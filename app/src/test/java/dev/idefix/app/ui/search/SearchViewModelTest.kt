@@ -63,20 +63,50 @@ class SearchViewModelTest {
     }
 
     @Test
-    fun filenameKeyIsConsumedAndArmsFilenameSearch() = runTest(dispatcher.scheduler) {
+    fun filenameKeyIsTypedWhenFilenameModeIsAlreadyActive() = runTest(dispatcher.scheduler) {
         val search = RecordingSearchRepository()
         val viewModel = viewModel(search)
         advanceUntilIdle()
 
+        // Filename is the default mode, so f is a normal query character here.
+        viewModel.setQuery("f")
+        advanceUntilIdle()
+        assertEquals("f", viewModel.state.value.query)
+        assertEquals(SearchMode.FILENAME, viewModel.state.value.mode)
+        assertEquals("f", search.lastQuery)
+        assertEquals(SearchMode.FILENAME, search.lastMode)
+    }
+
+    @Test
+    fun filenameKeySwitchesBackFromFullTextAndIsConsumed() = runTest(dispatcher.scheduler) {
+        val viewModel = viewModel(RecordingSearchRepository())
+        advanceUntilIdle()
+
+        viewModel.setQuery("g")
+        advanceUntilIdle()
+        assertEquals(SearchMode.TEXT, viewModel.state.value.mode)
+
+        viewModel.rearmCommand()
         viewModel.setQuery("f")
         advanceUntilIdle()
         assertEquals("", viewModel.state.value.query)
         assertEquals(SearchMode.FILENAME, viewModel.state.value.mode)
+    }
 
-        viewModel.setQuery("foo")
+    @Test
+    fun grepKeyIsTypedWhenFullTextModeIsAlreadyActive() = runTest(dispatcher.scheduler) {
+        val viewModel = viewModel(RecordingSearchRepository())
         advanceUntilIdle()
-        assertEquals("foo", search.lastQuery)
-        assertEquals(SearchMode.FILENAME, search.lastMode)
+
+        viewModel.setQuery("g")
+        advanceUntilIdle()
+        assertEquals(SearchMode.TEXT, viewModel.state.value.mode)
+
+        viewModel.rearmCommand()
+        viewModel.setQuery("g")
+        advanceUntilIdle()
+        assertEquals("g", viewModel.state.value.query)
+        assertEquals(SearchMode.TEXT, viewModel.state.value.mode)
     }
 
     @Test
@@ -153,6 +183,29 @@ class SearchViewModelTest {
         advanceUntilIdle()
         assertEquals(SearchMode.FILENAME, viewModel.state.value.mode)
         assertTrue(viewModel.state.value.commandArmed)
+    }
+
+    @Test
+    fun activeCommandGlyphFollowsTheSelectedCommand() = runTest(dispatcher.scheduler) {
+        val viewModel = viewModel(RecordingSearchRepository())
+        advanceUntilIdle()
+        assertEquals('f', viewModel.state.value.activeCommandGlyph)
+
+        viewModel.setQuery("g")
+        advanceUntilIdle()
+        assertEquals('g', viewModel.state.value.activeCommandGlyph)
+
+        viewModel.resetFilter()
+        advanceUntilIdle()
+        viewModel.setQuery("m")
+        advanceUntilIdle()
+        assertEquals('m', viewModel.state.value.activeCommandGlyph)
+
+        viewModel.resetFilter()
+        advanceUntilIdle()
+        viewModel.setQuery("n")
+        advanceUntilIdle()
+        assertEquals('n', viewModel.state.value.activeCommandGlyph)
     }
 
     @Test

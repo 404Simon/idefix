@@ -29,6 +29,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -79,12 +80,25 @@ fun RecentScreen(
                 modifier = Modifier.fillMaxSize(),
             )
         } else {
+            // Format timestamps once per history update instead of during every
+            // row composition while the list is scrolling.
+            val timeLabels = remember(files) {
+                files.associate { it.fileId to relativeTime(it.openedAt) }
+            }
             LazyColumn(modifier = Modifier.fillMaxSize()) {
                 item {
                     SectionLabel("Recently opened", Modifier.padding(horizontal = 16.dp, vertical = 8.dp))
                 }
-                items(files, key = { it.fileId }) { file ->
-                    RecentRow(file = file, onClick = { onOpen(file) })
+                items(
+                    files,
+                    key = { it.fileId },
+                    contentType = { "recent-file" },
+                ) { file ->
+                    RecentRow(
+                        file = file,
+                        timeLabel = timeLabels[file.fileId] ?: "",
+                        onClick = { onOpen(file) },
+                    )
                     Box(
                         Modifier
                             .fillMaxWidth()
@@ -99,7 +113,7 @@ fun RecentScreen(
 }
 
 @Composable
-private fun RecentRow(file: RecentFile, onClick: () -> Unit) {
+private fun RecentRow(file: RecentFile, timeLabel: String, onClick: () -> Unit) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.background,
@@ -136,7 +150,7 @@ private fun RecentRow(file: RecentFile, onClick: () -> Unit) {
             Spacer(Modifier.width(8.dp))
             Column(horizontalAlignment = Alignment.End) {
                 Text(
-                    text = relativeTime(file.openedAt),
+                    text = timeLabel,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

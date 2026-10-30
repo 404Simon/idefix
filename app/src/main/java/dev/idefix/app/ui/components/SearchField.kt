@@ -21,6 +21,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
@@ -39,9 +40,10 @@ fun SearchField(
     modifier: Modifier = Modifier,
     placeholder: String = "Search notes…",
     resetToken: Int = 0,
+    commandGlyph: Char? = null,
 ) {
     // Track the selection locally so programmatic value changes (the Modul_
-    // command, clear, recent search) move the caret to the end of the text
+    // command or clearing the field) move the caret to the end of the text
     // instead of leaving it at the previous offset. resetToken lets a command
     // discard a key that the text field briefly accepted.
     var fieldValue by remember { mutableStateOf(TextFieldValue(value, TextRange(value.length))) }
@@ -63,11 +65,20 @@ fun SearchField(
             Text(placeholder, style = MaterialTheme.typography.bodyLarge)
         },
         leadingIcon = {
-            Icon(
-                Icons.Default.Search,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.primary,
-            )
+            if (commandGlyph != null) {
+                Text(
+                    text = commandGlyph.toString(),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            } else {
+                Icon(
+                    Icons.Default.Search,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            }
         },
         trailingIcon = {
             if (value.isNotEmpty()) {

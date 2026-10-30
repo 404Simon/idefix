@@ -7,26 +7,21 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.FolderOpen
-import androidx.compose.material.icons.outlined.Refresh
-import androidx.compose.material.icons.outlined.StopCircle
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -38,8 +33,6 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import dev.idefix.app.domain.model.IndexState
-import dev.idefix.app.domain.model.IndexSummary
 import dev.idefix.app.domain.model.SNIPPET_HIGHLIGHT_END
 import dev.idefix.app.domain.model.SNIPPET_HIGHLIGHT_START
 
@@ -161,113 +154,6 @@ fun SectionLabel(text: String, modifier: Modifier = Modifier) {
     )
 }
 
-@Composable
-fun IndexStatusRow(
-    indexState: IndexState,
-    summary: IndexSummary,
-    onRebuild: () -> Unit,
-    onCancel: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerLow)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-    ) {
-        when (indexState) {
-            is IndexState.Running -> {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = when (indexState.phase) {
-                                dev.idefix.app.domain.model.IndexPhase.SCANNING ->
-                                    "Scanning vault · ${indexState.discovered} notes"
-
-                                dev.idefix.app.domain.model.IndexPhase.READING ->
-                                    "Indexing ${indexState.processed}/${indexState.discovered}"
-
-                                dev.idefix.app.domain.model.IndexPhase.FINALISING -> "Finishing index…"
-                                dev.idefix.app.domain.model.IndexPhase.CANCELLED -> "Indexing cancelled"
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
-                        if (indexState.currentPath != null) {
-                            Text(
-                                text = indexState.currentPath,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                    }
-                    IconButton(onClick = onCancel, modifier = Modifier.size(36.dp)) {
-                        Icon(Icons.Outlined.StopCircle, contentDescription = "Cancel indexing", modifier = Modifier.size(20.dp))
-                    }
-                }
-                Spacer(Modifier.height(8.dp))
-                if (indexState.discovered > 0) {
-                    LinearProgressIndicator(
-                        progress = { indexState.processed.toFloat() / indexState.discovered.coerceAtLeast(1) },
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                } else {
-                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-                }
-            }
-
-            is IndexState.Failed -> {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = "Index failed: ${indexState.message}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.weight(1f),
-                    )
-                    TextButton(onClick = onRebuild) { Text("Retry") }
-                }
-            }
-
-            else -> {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        val count = if (indexState is IndexState.Ready) indexState.fileCount else summary.fileCount
-                        val last = if (indexState is IndexState.Ready) indexState.lastIndexedAt else summary.lastIndexedAt
-                        Text(
-                            text = when {
-                                count == 0 -> "No notes indexed"
-                                else -> "$count notes indexed"
-                            },
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
-                        val failures = if (indexState is IndexState.Ready) indexState.failures else summary.failedCount
-                        if (failures > 0) {
-                            Text(
-                                text = "$failures file(s) could not be indexed",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.error,
-                            )
-                        } else if (last != null && count > 0) {
-                            Text(
-                                text = "Updated ${relativeTime(last)}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                    IconButton(onClick = onRebuild, modifier = Modifier.size(36.dp)) {
-                        Icon(Icons.Outlined.Refresh, contentDescription = "Rebuild index", modifier = Modifier.size(20.dp))
-                    }
-                }
-            }
-        }
-    }
-}
-
 fun relativeTime(timestamp: Long): String = DateUtils.getRelativeTimeSpanString(
     timestamp,
     System.currentTimeMillis(),
@@ -284,8 +170,11 @@ fun HighlightedText(
     maxLines: Int = 3,
     highlightColor: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.primary,
 ) {
+    val annotated = remember(text, query, highlightColor) {
+        highlightSnippet(text, query, highlightColor)
+    }
     Text(
-        text = highlightSnippet(text, query, highlightColor),
+        text = annotated,
         style = style,
         modifier = modifier,
         maxLines = maxLines,

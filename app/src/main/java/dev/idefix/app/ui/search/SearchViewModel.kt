@@ -5,7 +5,6 @@ import androidx.lifecycle.viewModelScope
 import dev.idefix.app.domain.model.IndexSummary
 import dev.idefix.app.domain.model.RecentFile
 import dev.idefix.app.domain.model.MODUL_PREFIX
-import dev.idefix.app.domain.model.RecentSearch
 import dev.idefix.app.domain.model.SearchCommand
 import dev.idefix.app.domain.model.SearchMode
 import dev.idefix.app.domain.model.SearchResult
@@ -33,7 +32,6 @@ data class SearchUiState(
     val selectedIndex: Int = 0,
     val summary: IndexSummary = IndexSummary(0, null, 0),
     val recentFiles: List<RecentFile> = emptyList(),
-    val recentSearches: List<RecentSearch> = emptyList(),
     val durationMs: Long = 0,
     /** True while the next key typed into an empty field should act as a command. */
     val commandArmed: Boolean = true,
@@ -58,6 +56,20 @@ data class SearchUiState(
             mode == SearchMode.LITERAL -> "Exact text…"
             else -> "Regular expression…"
         }
+
+    /** The command currently represented by the search mode, if any. */
+    val activeCommand: SearchCommand?
+        get() = when {
+            creatingNote -> SearchCommand.NEW_NOTE
+            prefixOnly -> SearchCommand.MODUL
+            mode == SearchMode.FILENAME -> SearchCommand.FILENAME
+            mode == SearchMode.TEXT -> SearchCommand.GREP
+            else -> null
+        }
+
+    /** The command letter shown in place of the search icon while one is active. */
+    val activeCommandGlyph: Char?
+        get() = activeCommand?.key
 }
 
 class SearchViewModel(
@@ -102,11 +114,6 @@ class SearchViewModel(
                 _state.update { it.copy(recentFiles = files) }
             }
         }
-        viewModelScope.launch {
-            recentFilesRepository.recentSearches.collect { searches ->
-                _state.update { it.copy(recentSearches = searches) }
-            }
-        }
         refreshSummary()
     }
 
@@ -114,7 +121,9 @@ class SearchViewModel(
         val current = _state.value
         if (current.commandArmed && !current.creatingNote && current.query.isEmpty() && query.length == 1) {
             val command = SearchCommand.fromKey(query[0])
-            if (command != null) {
+            // Only consume a command key when it would change the mode. Pressing
+            // the key of the already-active mode should type the character.
+            if (command != null && command != current.activeCommand) {
                 applyCommand(command)
                 return
             }
@@ -244,18 +253,6 @@ class SearchViewModel(
         if (_state.value.creatingNote) return
         if (_state.value.query.isNotBlank()) {
             scheduleSearch(immediate = true)
-            viewModelScope.launch {
-                recentFilesRepository.recordSearch(_state.value.query.trim(), _state.value.mode)
-            }
-        }
-    }
-
-    fun recordOpened() {
-        val current = _state.value
-        if (current.query.isNotBlank()) {
-            viewModelScope.launch {
-                recentFilesRepository.recordSearch(current.query.trim(), current.mode)
-            }
         }
     }
 
@@ -280,13 +277,6 @@ class SearchViewModel(
     fun saveScroll(firstVisibleItem: Int, firstVisibleOffset: Int) {
         savedScrollIndex = firstVisibleItem
         savedScrollOffset = firstVisibleOffset
-    }
-
-    fun useRecentSearch(search: RecentSearch) {
-        _state.update {
-            it.copy(mode = search.mode, creatingNote = false, commandArmed = false, prefixOnly = false)
-        }
-        setQuery(search.query, immediate = true)
     }
 
     private fun scheduleSearch(immediate: Boolean) {

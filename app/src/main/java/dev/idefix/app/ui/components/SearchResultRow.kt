@@ -36,6 +36,7 @@ fun SearchResultRow(
     selected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    timeLabel: String? = null,
 ) {
     val background = if (selected) {
         MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
@@ -105,10 +106,10 @@ fun SearchResultRow(
                     )
                 }
             }
-            if (result.lastModified != null) {
+            if (timeLabel != null) {
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    text = relativeTime(result.lastModified),
+                    text = timeLabel,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,

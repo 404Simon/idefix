@@ -3,7 +3,6 @@ package dev.idefix.app.ui.recents
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dev.idefix.app.domain.model.RecentFile
-import dev.idefix.app.domain.model.RecentSearch
 import dev.idefix.app.domain.repository.RecentFilesRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -22,9 +21,6 @@ class RecentViewModel(
 ) : ViewModel() {
 
     val recentFiles: StateFlow<List<RecentFile>> = repository.recentFiles
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
-
-    val recentSearches: StateFlow<List<RecentSearch>> = repository.recentSearches
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     private val _state = MutableStateFlow(RecentUiState())

@@ -310,7 +310,6 @@ fun IdefixApp(
     }
 
     fun openSearchResult(result: SearchResult) {
-        searchViewModel.recordOpened()
         requestOpen(
             OpenDocumentRequest(
                 fileId = result.fileId,
@@ -474,9 +473,7 @@ fun IdefixApp(
                                                     indexState = appState.indexState,
                                                     vaultName = appState.vault?.displayName ?: "Vault",
                                                     focusRequestToken = searchFocusToken,
-                                                    onCreateNote = { showCreateNote = true },
                                                     onCreateNamedNote = ::createNote,
-                                                    onOpenFileBrowser = { showFileBrowser = true },
                                                     onSwitchVault = { vaultPicker.launch(null) },
                                                     onOpenResult = ::openSearchResult,
                                                     onOpenRecent = ::openRecent,

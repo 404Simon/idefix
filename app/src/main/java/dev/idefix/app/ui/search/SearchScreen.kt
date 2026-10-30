@@ -2,8 +2,6 @@ package dev.idefix.app.ui.search
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,25 +17,17 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.NoteAdd
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.outlined.FolderOpen
-import androidx.compose.material.icons.outlined.ManageSearch
+import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.outlined.SearchOff
-import androidx.compose.material3.AssistChip
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -46,12 +36,12 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -65,19 +55,18 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.idefix.app.domain.model.IndexState
 import dev.idefix.app.domain.model.RecentFile
-import dev.idefix.app.domain.model.SearchCommand
 import dev.idefix.app.domain.model.SearchMode
 import dev.idefix.app.domain.model.SearchResult
 import dev.idefix.app.ui.components.EmptyState
 import dev.idefix.app.ui.components.ErrorState
 import dev.idefix.app.ui.components.FilePathLabel
-import dev.idefix.app.ui.components.HighlightedText
-import dev.idefix.app.ui.components.IndexStatusRow
 import dev.idefix.app.ui.components.LoadingState
 import dev.idefix.app.ui.components.SearchField
 import dev.idefix.app.ui.components.SearchResultDivider
@@ -92,9 +81,7 @@ fun SearchScreen(
     indexState: IndexState,
     vaultName: String,
     focusRequestToken: Int,
-    onCreateNote: () -> Unit,
     onCreateNamedNote: (String) -> Unit,
-    onOpenFileBrowser: () -> Unit,
     onSwitchVault: () -> Unit,
     onOpenResult: (SearchResult) -> Unit,
     onOpenRecent: (RecentFile) -> Unit,
@@ -144,12 +131,11 @@ fun SearchScreen(
                 }
             },
             actions = {
-                IconButton(onClick = onOpenFileBrowser) {
-                    Icon(Icons.Outlined.FolderOpen, contentDescription = "Browse vault files")
-                }
-                IconButton(onClick = onCreateNote) {
-                    Icon(Icons.Default.Add, contentDescription = "New note")
-                }
+                SyncAction(
+                    indexState = indexState,
+                    onSync = onRebuild,
+                    onCancel = onCancelIndex,
+                )
                 Box {
                     IconButton(onClick = { menuOpen = true }) {
                         Icon(Icons.Default.MoreVert, contentDescription = "More actions")
@@ -160,13 +146,6 @@ fun SearchScreen(
                             onClick = {
                                 menuOpen = false
                                 onSwitchVault()
-                            },
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Rebuild index") },
-                            onClick = {
-                                menuOpen = false
-                                onRebuild()
                             },
                         )
                     }
@@ -226,18 +205,7 @@ fun SearchScreen(
                 modifier = Modifier.onFocusChanged { fieldFocused = it.isFocused },
                 placeholder = state.placeholder,
                 resetToken = state.commandRevision,
-            )
-            Spacer(Modifier.height(8.dp))
-            CommandBar(
-                state = state,
-                onCommand = viewModel::applyCommand,
-            )
-            Spacer(Modifier.height(8.dp))
-            IndexStatusRow(
-                indexState = indexState,
-                summary = state.summary,
-                onRebuild = onRebuild,
-                onCancel = onCancelIndex,
+                commandGlyph = state.activeCommandGlyph,
             )
             Spacer(Modifier.height(6.dp))
         }
@@ -257,7 +225,6 @@ fun SearchScreen(
             SearchLanding(
                 state = state,
                 onOpenRecent = onOpenRecent,
-                onUseRecentSearch = viewModel::useRecentSearch,
                 modifier = Modifier.fillMaxSize(),
             )
         } else {
@@ -275,38 +242,32 @@ fun SearchScreen(
 }
 
 @Composable
-private fun CommandBar(
-    state: SearchUiState,
-    onCommand: (SearchCommand) -> Unit,
+private fun SyncAction(
+    indexState: IndexState,
+    onSync: () -> Unit,
+    onCancel: () -> Unit,
 ) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .horizontalScroll(rememberScrollState()),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        SearchCommand.entries.forEach { command ->
-            val selected = when (command) {
-                SearchCommand.FILENAME -> state.mode == SearchMode.FILENAME && !state.prefixOnly && !state.creatingNote
-                SearchCommand.GREP -> state.mode == SearchMode.TEXT && !state.creatingNote
-                SearchCommand.NEW_NOTE -> state.creatingNote
-                SearchCommand.MODUL -> state.prefixOnly
-            }
-            FilterChip(
-                selected = selected,
-                onClick = { onCommand(command) },
-                label = {
-                    Text(
-                        text = "${command.key}  ${command.label}",
-                        style = MaterialTheme.typography.labelMedium,
-                    )
-                },
-                colors = FilterChipDefaults.filterChipColors(
-                    selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
-                    selectedLabelColor = MaterialTheme.colorScheme.primary,
-                ),
+    when (indexState) {
+        is IndexState.Running -> IconButton(
+            onClick = onCancel,
+            modifier = Modifier.semantics { contentDescription = "Cancel sync" },
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(20.dp),
+                strokeWidth = 2.dp,
             )
+        }
+
+        is IndexState.Failed -> IconButton(onClick = onSync) {
+            Icon(
+                Icons.Default.Sync,
+                contentDescription = "Retry sync",
+                tint = MaterialTheme.colorScheme.error,
+            )
+        }
+
+        else -> IconButton(onClick = onSync) {
+            Icon(Icons.Default.Sync, contentDescription = "Sync vault")
         }
     }
 }
@@ -369,35 +330,14 @@ private fun CreateNotePanel(
 private fun SearchLanding(
     state: SearchUiState,
     onOpenRecent: (RecentFile) -> Unit,
-    onUseRecentSearch: (dev.idefix.app.domain.model.RecentSearch) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // Format timestamps once per history update instead of during every row
+    // composition while the list is scrolling.
+    val timeLabels = remember(state.recentFiles) {
+        state.recentFiles.associate { it.fileId to relativeTime(it.openedAt) }
+    }
     LazyColumn(modifier = modifier.padding(horizontal = 12.dp)) {
-        if (state.recentSearches.isNotEmpty()) {
-            item {
-                SectionLabel("Recent searches", Modifier.padding(top = 8.dp, bottom = 6.dp))
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                ) {
-                    state.recentSearches.take(12).forEach { search ->
-                        AssistChip(
-                            onClick = { onUseRecentSearch(search) },
-                            label = {
-                                Text(
-                                    text = search.query,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            },
-                        )
-                    }
-                }
-                Spacer(Modifier.height(8.dp))
-            }
-        }
         item {
             SectionLabel("Recent notes", Modifier.padding(top = 8.dp, bottom = 6.dp))
         }
@@ -407,7 +347,7 @@ private fun SearchLanding(
                     icon = Icons.Default.Description,
                     title = "No recent notes yet",
                     message = if (state.summary.fileCount == 0) {
-                        "Index a vault to search filenames or full text. Use the rebuild button above, or browse files directly."
+                        "Index a vault to search filenames or full text. Use the sync button in the top bar, or browse files from Settings."
                     } else {
                         "Open a note from search, the file browser, or tasks. It will appear here."
                     },
@@ -415,8 +355,16 @@ private fun SearchLanding(
                 )
             }
         } else {
-            items(state.recentFiles, key = { it.fileId }) { file ->
-                RecentFileRow(file = file, onClick = { onOpenRecent(file) })
+            items(
+                state.recentFiles,
+                key = { it.fileId },
+                contentType = { "recent-file" },
+            ) { file ->
+                RecentFileRow(
+                    file = file,
+                    timeLabel = timeLabels[file.fileId] ?: "",
+                    onClick = { onOpenRecent(file) },
+                )
             }
         }
         item { Spacer(Modifier.height(24.dp)) }
@@ -424,7 +372,7 @@ private fun SearchLanding(
 }
 
 @Composable
-private fun RecentFileRow(file: RecentFile, onClick: () -> Unit) {
+private fun RecentFileRow(file: RecentFile, timeLabel: String, onClick: () -> Unit) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         color = MaterialTheme.colorScheme.surface,
@@ -464,7 +412,7 @@ private fun RecentFileRow(file: RecentFile, onClick: () -> Unit) {
             Spacer(Modifier.width(8.dp))
             Column(horizontalAlignment = Alignment.End) {
                 Text(
-                    text = relativeTime(file.openedAt),
+                    text = timeLabel,
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -494,9 +442,15 @@ private fun SearchResults(
         initialFirstVisibleItemIndex = savedScroll.first,
         initialFirstVisibleItemScrollOffset = savedScroll.second,
     )
-    LaunchedEffect(listState) {
-        snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
-            .collect { (index, offset) -> viewModel.saveScroll(index, offset) }
+    // Save the scroll position when the list leaves composition instead of
+    // observing the scroll state on every frame.
+    DisposableEffect(listState) {
+        onDispose {
+            viewModel.saveScroll(
+                listState.firstVisibleItemIndex,
+                listState.firstVisibleItemScrollOffset,
+            )
+        }
     }
     LaunchedEffect(state.query, state.mode) {
         if (listState.firstVisibleItemIndex != 0) listState.scrollToItem(0)
@@ -505,6 +459,11 @@ private fun SearchResults(
         if (state.results.isNotEmpty()) {
             listState.animateScrollToItem(state.selectedIndex.coerceIn(0, state.results.lastIndex))
         }
+    }
+    val timeLabels = remember(state.results) {
+        state.results.mapNotNull { it.lastModified }
+            .distinct()
+            .associateWith(::relativeTime)
     }
 
     Box(
@@ -547,7 +506,7 @@ private fun SearchResults(
                 message = when (state.mode) {
                     SearchMode.REGEX -> "The regular expression matched nothing. Check the expression and case sensitivity."
                     SearchMode.FILENAME -> "No file names matched. Try a shorter fragment or a different spelling."
-                    else -> "No notes contain this text. The index may be stale — rebuild it from the status bar."
+                    else -> "No notes contain this text. The index may be stale — sync it from the top bar."
                 },
                 modifier = Modifier.fillMaxSize(),
             )
@@ -560,18 +519,17 @@ private fun SearchResults(
                     key = { _, result -> "${result.fileId}-${result.line}-${result.relativePath}" },
                     contentType = { _, _ -> "search-result" },
                 ) { index, result ->
-                    Column(modifier = Modifier.animateItem()) {
-                        SearchResultRow(
-                            result = result,
-                            query = state.query,
-                            selected = index == state.selectedIndex,
-                            onClick = {
-                                onClearFocus()
-                                onOpenResult(result)
-                            },
-                        )
-                        SearchResultDivider()
-                    }
+                    SearchResultRow(
+                        result = result,
+                        query = state.query,
+                        selected = index == state.selectedIndex,
+                        onClick = {
+                            onClearFocus()
+                            onOpenResult(result)
+                        },
+                        timeLabel = result.lastModified?.let(timeLabels::get),
+                    )
+                    SearchResultDivider()
                 }
                 item {
                     Text(
