@@ -76,6 +76,9 @@ class DefaultSearchRepository(
         val files = fileDao.getAll()
         val scored = ArrayList<Pair<dev.idefix.app.data.database.FileEntity, Double>>()
         for (file in files) {
+            // Typing quickly cancels the previous search; abandon this loop as
+            // soon as that happens so old work never delays the fresh query.
+            currentCoroutineContext().ensureActive()
             if (prefixOnly && !file.filename.startsWith(query, ignoreCase = true)) continue
             val score = FilenameMatcher.score(query, file.filename, file.relativePath)
             if (score >= FilenameMatcher.MIN_SCORE) scored += file to score

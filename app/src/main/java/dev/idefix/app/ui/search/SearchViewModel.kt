@@ -34,8 +34,6 @@ data class SearchUiState(
     val summary: IndexSummary = IndexSummary(0, null, 0),
     val recentFiles: List<RecentFile> = emptyList(),
     val recentSearches: List<RecentSearch> = emptyList(),
-    val firstVisibleItem: Int = 0,
-    val firstVisibleOffset: Int = 0,
     val durationMs: Long = 0,
     /** True while the next key typed into an empty field should act as a command. */
     val commandArmed: Boolean = true,
@@ -73,6 +71,8 @@ class SearchViewModel(
 
     private var searchJob: Job? = null
     private var initialisedFromSettings = false
+    private var savedScrollIndex = 0
+    private var savedScrollOffset = 0
 
     init {
         viewModelScope.launch {
@@ -270,8 +270,16 @@ class SearchViewModel(
         }
     }
 
+    /**
+     * Scroll position is kept outside [SearchUiState] on purpose: writing it to
+     * the state flow on every scroll frame would recompose the whole screen and
+     * make the result list stutter.
+     */
+    fun scrollPosition(): Pair<Int, Int> = savedScrollIndex to savedScrollOffset
+
     fun saveScroll(firstVisibleItem: Int, firstVisibleOffset: Int) {
-        _state.update { it.copy(firstVisibleItem = firstVisibleItem, firstVisibleOffset = firstVisibleOffset) }
+        savedScrollIndex = firstVisibleItem
+        savedScrollOffset = firstVisibleOffset
     }
 
     fun useRecentSearch(search: RecentSearch) {
@@ -301,7 +309,9 @@ class SearchViewModel(
         val caseSensitive = _state.value.caseSensitive
         val prefixOnly = _state.value.prefixOnly
         searchJob = viewModelScope.launch {
-            if (!immediate) delay(180)
+            // Filename matching is cheap and should track typing closely. Content
+            // searches stay debounced because they scan every indexed document.
+            if (!immediate) delay(if (mode == SearchMode.FILENAME) 60 else 160)
             _state.update { it.copy(isSearching = true, error = null) }
             val outcome = searchRepository.search(query, mode, caseSensitive, prefixOnly = prefixOnly)
             if (_state.value.query.trim() != query ||

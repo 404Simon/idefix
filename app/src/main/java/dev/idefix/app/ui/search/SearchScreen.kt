@@ -489,9 +489,10 @@ private fun SearchResults(
     viewModel: SearchViewModel,
     modifier: Modifier = Modifier,
 ) {
+    val savedScroll = remember(viewModel) { viewModel.scrollPosition() }
     val listState = rememberLazyListState(
-        initialFirstVisibleItemIndex = state.firstVisibleItem,
-        initialFirstVisibleItemScrollOffset = state.firstVisibleOffset,
+        initialFirstVisibleItemIndex = savedScroll.first,
+        initialFirstVisibleItemScrollOffset = savedScroll.second,
     )
     LaunchedEffect(listState) {
         snapshotFlow { listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset }
@@ -554,18 +555,23 @@ private fun SearchResults(
             else -> LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
                 itemsIndexed(
                     state.results,
-                    key = { index, result -> "${result.fileId}-${result.line}-${result.relativePath}-$index" },
+                    // Keep identity stable across queries so unchanged rows are
+                    // reused instead of being torn down on every keystroke.
+                    key = { _, result -> "${result.fileId}-${result.line}-${result.relativePath}" },
+                    contentType = { _, _ -> "search-result" },
                 ) { index, result ->
-                    SearchResultRow(
-                        result = result,
-                        query = state.query,
-                        selected = index == state.selectedIndex,
-                        onClick = {
-                            onClearFocus()
-                            onOpenResult(result)
-                        },
-                    )
-                    SearchResultDivider()
+                    Column(modifier = Modifier.animateItem()) {
+                        SearchResultRow(
+                            result = result,
+                            query = state.query,
+                            selected = index == state.selectedIndex,
+                            onClick = {
+                                onClearFocus()
+                                onOpenResult(result)
+                            },
+                        )
+                        SearchResultDivider()
+                    }
                 }
                 item {
                     Text(
@@ -575,25 +581,6 @@ private fun SearchResults(
                         modifier = Modifier.padding(16.dp),
                     )
                 }
-            }
-        }
-
-        if (state.isSearching && state.results.isNotEmpty()) {
-            Row(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .padding(top = 4.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                    .padding(horizontal = 12.dp, vertical = 5.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                androidx.compose.material3.CircularProgressIndicator(
-                    modifier = Modifier.size(12.dp),
-                    strokeWidth = 1.5.dp,
-                )
-                Text("Updating…", style = MaterialTheme.typography.labelSmall)
             }
         }
     }
