@@ -65,6 +65,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.window.core.layout.WindowSizeClass
 import dev.idefix.app.AppContainer
+import dev.idefix.app.domain.model.DocumentMode
 import dev.idefix.app.domain.model.IndexState
 import dev.idefix.app.domain.model.RecentFile
 import dev.idefix.app.domain.model.SearchResult
@@ -337,6 +338,7 @@ fun IdefixApp(
                         relativePath = file.relativePath,
                         filename = file.displayName,
                         line = 1,
+                        mode = DocumentMode.SOURCE,
                     ),
                 )
                 snackbarHostState.showSnackbar("Created ${file.displayName}")
@@ -370,7 +372,7 @@ fun IdefixApp(
 
                     Key.F -> {
                         if (documentState.hasDocument) {
-                            documentViewModel.setMode(dev.idefix.app.domain.model.DocumentMode.SOURCE)
+                            documentViewModel.setMode(DocumentMode.SOURCE)
                             documentViewModel.showFind()
                             true
                         } else {

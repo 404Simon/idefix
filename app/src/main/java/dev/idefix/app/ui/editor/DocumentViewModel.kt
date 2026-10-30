@@ -25,7 +25,9 @@ data class OpenDocumentRequest(
     val uri: String,
     val relativePath: String,
     val filename: String,
+    /** A matching line to surface in the reader; does not change the mode. */
     val line: Int? = null,
+    val mode: DocumentMode = DocumentMode.PREVIEW,
 )
 
 data class SelectionRequest(val id: Long, val offset: Int)
@@ -46,7 +48,6 @@ data class DocumentUiState(
     val isDirty: Boolean = false,
     val isSaving: Boolean = false,
     val saveMessage: String? = null,
-    val matchLine: Int? = null,
     val cursorLine: Int = 1,
     val cursorOffset: Int = 0,
     val scrollOffset: Int = 0,
@@ -102,7 +103,6 @@ class DocumentViewModel(
                 } else {
                     position?.cursorLine ?: 1
                 }
-                val mode = if (request.line != null) DocumentMode.SOURCE else DocumentMode.PREVIEW
                 selectionId++
                 _state.value = DocumentUiState(
                     isLoading = false,
@@ -111,8 +111,7 @@ class DocumentViewModel(
                     originalContent = content,
                     editContent = content,
                     fingerprint = fingerprint,
-                    mode = mode,
-                    matchLine = request.line,
+                    mode = request.mode,
                     cursorLine = cursorLine,
                     cursorOffset = cursorOffset,
                     scrollOffset = position?.scrollOffset ?: 0,
@@ -140,7 +139,7 @@ class DocumentViewModel(
                 uri = file.uri,
                 relativePath = file.relativePath,
                 filename = file.displayName,
-                line = current.matchLine,
+                mode = current.mode,
             ),
         )
     }
@@ -329,19 +328,6 @@ class DocumentViewModel(
         jumpTo(current.findMatches[previous])
     }
 
-    fun jumpToLine(line: Int) {
-        val content = _state.value.editContent
-        val offset = MarkdownLines.offsetForLine(content, line)
-        selectionId++
-        _state.update {
-            it.copy(
-                cursorLine = line,
-                cursorOffset = offset,
-                selectionRequest = SelectionRequest(selectionId, offset),
-            )
-        }
-    }
-
     fun clearSaveMessage() {
         _state.update { it.copy(saveMessage = null) }
     }
@@ -364,7 +350,7 @@ class DocumentViewModel(
                     it.copy(file = renamed, fileId = newId, saveMessage = "Renamed to ${renamed.displayName}")
                 }
                 if (newId != null) {
-                    recentFilesRepository.recordOpen(renamed, newId, current.matchLine, current.cursorOffset)
+                    recentFilesRepository.recordOpen(renamed, newId, current.cursorLine, current.cursorOffset)
                 }
                 onRenamed(renamed)
             } catch (e: Exception) {
@@ -440,7 +426,7 @@ class DocumentViewModel(
                     cursorLine = current.cursorLine,
                     cursorOffset = current.cursorOffset,
                     scrollOffset = current.scrollOffset,
-                    matchLine = current.matchLine,
+                    matchLine = null,
                 )
             }
         }

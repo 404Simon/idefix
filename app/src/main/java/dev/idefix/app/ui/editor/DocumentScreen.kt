@@ -306,27 +306,16 @@ fun DocumentScreen(
                 )
 
                 state.mode == DocumentMode.PREVIEW -> {
-                    Column(modifier = Modifier.fillMaxSize()) {
-                        if (state.matchLine != null) {
-                            MatchBanner(
-                                line = state.matchLine,
-                                onEdit = {
-                                    viewModel.setMode(DocumentMode.SOURCE)
-                                    viewModel.jumpToLine(state.matchLine)
-                                },
-                            )
-                        }
-                        androidx.compose.foundation.layout.Box(modifier = Modifier.weight(1f)) {
-                            androidx.compose.runtime.key(state.file?.uri) {
-                                MarkdownPreview(
-                                    content = state.editContent,
-                                    onInternalLink = onOpenInternalLink,
-                                    modifier = Modifier.fillMaxSize(),
-                                    initialScroll = state.scrollOffset,
-                                    onScrollChanged = viewModel::onScrollChanged,
-                                )
-                            }
-                        }
+                    androidx.compose.runtime.key(state.file?.uri) {
+                        MarkdownPreview(
+                            content = state.editContent,
+                            onInternalLink = onOpenInternalLink,
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxWidth(),
+                            initialScroll = state.scrollOffset,
+                            onScrollChanged = viewModel::onScrollChanged,
+                        )
                     }
                 }
 
@@ -563,30 +552,4 @@ private fun SourceStatusBar(state: DocumentUiState) {
     }
 }
 
-@Composable
-private fun MatchBanner(line: Int, onEdit: () -> Unit) {
-    Surface(
-        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.10f),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                Icons.Outlined.FindReplace,
-                contentDescription = null,
-                modifier = Modifier.size(16.dp),
-                tint = MaterialTheme.colorScheme.primary,
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                text = "Match on line $line",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.weight(1f),
-            )
-            TextButton(onClick = onEdit) { Text("Edit at match") }
-        }
-    }
-}
+
