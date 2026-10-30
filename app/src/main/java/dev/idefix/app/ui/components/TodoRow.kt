@@ -36,7 +36,6 @@ import java.time.temporal.ChronoUnit
 @Composable
 fun TodoRow(
     todo: TodoItem,
-    pending: Boolean,
     onToggle: (Boolean) -> Unit,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -51,7 +50,6 @@ fun TodoRow(
         Checkbox(
             checked = todo.completed,
             onCheckedChange = onToggle,
-            enabled = !pending,
             modifier = Modifier.semantics { contentDescription = "Todo: ${todo.title}" },
         )
         Column(

@@ -29,7 +29,10 @@ class TodoModelsTest {
         assertEquals("TODO.md", TodoList.fileNameFor("main"))
         assertEquals("job.TODO.md", TodoList.fileNameFor("job"))
         assertEquals("job.TODO.md", TodoList.fileNameFor("job.TODO.md"))
+        assertEquals("job.TODO.md", TodoList.fileNameFor("job.md"))
         assertEquals("a-b.TODO.md", TodoList.fileNameFor("a/b"))
+        assertEquals("secret.TODO.md", TodoList.fileNameFor(".secret"))
+        assertEquals("TODO.md", TodoList.fileNameFor("."))
     }
 
     @Test

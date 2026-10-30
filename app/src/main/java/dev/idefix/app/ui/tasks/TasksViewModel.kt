@@ -7,6 +7,7 @@ import dev.idefix.app.domain.model.TodoItem
 import dev.idefix.app.domain.model.TodoList
 import dev.idefix.app.domain.model.TodoUpdateResult
 import dev.idefix.app.domain.repository.TodoRepository
+import dev.idefix.app.sync.SyncCoordinator
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -38,9 +39,10 @@ data class TasksUiState(
 
 class TasksViewModel(
     private val todoRepository: TodoRepository,
+    private val syncCoordinator: SyncCoordinator,
 ) : ViewModel() {
 
-    private val _state = MutableStateFlow(TasksUiState())
+    private val _state = MutableStateFlow(TasksUiState(isLoadingLists = true))
     val state: StateFlow<TasksUiState> = _state.asStateFlow()
 
     private val writeMutex = Mutex()
@@ -67,6 +69,7 @@ class TasksViewModel(
                 tasks = emptyList(),
                 error = null,
                 pendingLines = emptySet(),
+                isLoadingTasks = true,
             )
         }
         loadTasks(list)
@@ -80,6 +83,7 @@ class TasksViewModel(
                 tasks = emptyList(),
                 error = null,
                 pendingLines = emptySet(),
+                isLoadingTasks = false,
             )
         }
     }
@@ -100,9 +104,10 @@ class TasksViewModel(
                 pendingLines = current.pendingLines + key,
             )
         }
-        viewModelScope.launch {
-            writeMutex.withLock {
+        launchWrite {
+            try {
                 handleResult(todoRepository.setCompleted(list, task, completed))
+            } finally {
                 _state.update { it.copy(pendingLines = it.pendingLines - key) }
                 reconcileCurrent()
             }
@@ -115,7 +120,11 @@ class TasksViewModel(
             _state.update { it.copy(message = "Enter a todo title") }
             return
         }
-        if (existing != null && existing.startLine <= 0) return
+        if (existing != null &&
+            (existing.startLine <= 0 || existing.startLine in _state.value.pendingLines)
+        ) {
+            return
+        }
         if (existing == null) {
             addOptimistically(list, draft)
         } else {
@@ -125,13 +134,14 @@ class TasksViewModel(
 
     fun deleteTask(task: TodoItem) {
         val list = _state.value.selectedList ?: return
-        if (task.startLine <= 0) return
+        if (task.startLine <= 0 || task.startLine in _state.value.pendingLines) return
         _state.update { current ->
             current.withTasks(current.tasks.filterNot { it.startLine == task.startLine })
         }
-        viewModelScope.launch {
-            writeMutex.withLock {
+        launchWrite {
+            try {
                 handleResult(todoRepository.deleteTask(list, task))
+            } finally {
                 reconcileCurrent()
             }
         }
@@ -164,8 +174,8 @@ class TasksViewModel(
                 message = null,
             )
         }
-        viewModelScope.launch {
-            writeMutex.withLock {
+        launchWrite {
+            try {
                 when (val result = todoRepository.createList(cleaned)) {
                     is TodoUpdateResult.Success -> {
                         val path = result.relativePath ?: filename
@@ -182,15 +192,24 @@ class TasksViewModel(
                                 lists = it.lists.map { list ->
                                     if (list.relativePath == filename) created else list
                                 }.sortedForDisplay(),
-                                selectedList = created,
-                                tasks = emptyList(),
-                                pendingLines = emptySet(),
                                 creatingListPath = null,
                                 error = null,
                             )
                         }
-                        loadTasks(created)
-                        loadLists(selectPath = path, reloadTasks = false)
+                        if (result.message.contains("index refresh failed", ignoreCase = true)) {
+                            _state.update { it.copy(message = result.message) }
+                        }
+                        if (_state.value.selectedList == null) {
+                            _state.update {
+                                it.copy(
+                                    selectedList = created,
+                                    tasks = emptyList(),
+                                    pendingLines = emptySet(),
+                                    isLoadingTasks = true,
+                                )
+                            }
+                            loadTasks(created)
+                        }
                     }
 
                     is TodoUpdateResult.Conflict -> {
@@ -217,12 +236,17 @@ class TasksViewModel(
                         }
                     }
                 }
+            } finally {
+                _state.update {
+                    if (it.creatingListPath == filename) {
+                        it.copy(creatingListPath = null)
+                    } else {
+                        it
+                    }
+                }
             }
         }
     }
-
-    fun isPending(task: TodoItem): Boolean =
-        task.startLine <= 0 || task.startLine in _state.value.pendingLines
 
     fun consumeMessage() {
         _state.update { it.copy(message = null) }
@@ -248,9 +272,10 @@ class TasksViewModel(
                 pendingLines = current.pendingLines + tempLine,
             )
         }
-        viewModelScope.launch {
-            writeMutex.withLock {
+        launchWrite {
+            try {
                 handleResult(todoRepository.addTask(list, draft))
+            } finally {
                 _state.update { current ->
                     current.withTasks(
                         tasks = current.tasks.filterNot { it.startLine == tempLine },
@@ -280,9 +305,10 @@ class TasksViewModel(
                 pendingLines = current.pendingLines + existing.startLine,
             )
         }
-        viewModelScope.launch {
-            writeMutex.withLock {
+        launchWrite {
+            try {
                 handleResult(todoRepository.updateTask(list, existing, draft))
+            } finally {
                 _state.update {
                     it.copy(pendingLines = it.pendingLines - existing.startLine)
                 }
@@ -295,30 +321,31 @@ class TasksViewModel(
         listsJob?.cancel()
         listsJob = viewModelScope.launch {
             _state.update { it.copy(isLoadingLists = true, error = null) }
-            runCatching { todoRepository.loadLists() }
-                .onSuccess { lists ->
-                    val selected = selectPath?.let { path ->
-                        lists.firstOrNull { it.relativePath == path }
-                    }
-                    _state.update {
-                        it.copy(
-                            lists = lists,
-                            selectedList = selected,
-                            tasks = if (selected == null) emptyList() else it.tasks,
-                            isLoadingLists = false,
-                            error = null,
-                        )
-                    }
-                    if (selected != null && reloadTasks) loadTasks(selected)
+            try {
+                val lists = todoRepository.loadLists()
+                val selected = selectPath?.let { path ->
+                    lists.firstOrNull { it.relativePath == path }
                 }
-                .onFailure { error ->
-                    _state.update {
-                        it.copy(
-                            isLoadingLists = false,
-                            error = error.message ?: "Could not load todo lists",
-                        )
-                    }
+                _state.update {
+                    it.copy(
+                        lists = lists,
+                        selectedList = selected,
+                        tasks = if (selected == null) emptyList() else it.tasks,
+                        isLoadingLists = false,
+                        error = null,
+                    )
                 }
+                if (selected != null && reloadTasks) loadTasks(selected)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(
+                        isLoadingLists = false,
+                        error = e.message ?: "Could not load todo lists",
+                    )
+                }
+            }
         }
     }
 
@@ -326,25 +353,35 @@ class TasksViewModel(
         tasksJob?.cancel()
         tasksJob = viewModelScope.launch {
             _state.update {
-                it.copy(isLoadingTasks = true, error = null, pendingLines = emptySet())
+                it.copy(isLoadingTasks = true, error = null)
             }
-            runCatching { todoRepository.loadTasks(list) }
-                .onSuccess { tasks ->
-                    _state.update {
-                        it.withTasks(tasks, pendingLines = emptySet()).copy(
-                            isLoadingTasks = false,
-                            error = null,
-                        )
-                    }
+            try {
+                val tasks = todoRepository.loadTasks(list)
+                if (_state.value.selectedList?.relativePath != list.relativePath) return@launch
+                _state.update {
+                    val merged = it.mergeOptimistic(tasks)
+                    it.withTasks(
+                        tasks = merged,
+                        pendingLines = it.pendingLines.filter { line ->
+                            merged.any { todo -> todo.startLine == line }
+                        }.toSet(),
+                    ).copy(
+                        isLoadingTasks = false,
+                        error = null,
+                    )
                 }
-                .onFailure { error ->
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                if (_state.value.selectedList?.relativePath == list.relativePath) {
                     _state.update {
                         it.copy(
                             isLoadingTasks = false,
-                            error = error.message ?: "Could not load the todo list",
+                            error = e.message ?: "Could not load the todo list",
                         )
                     }
                 }
+            }
         }
     }
 
@@ -355,22 +392,65 @@ class TasksViewModel(
      */
     private suspend fun reconcileCurrent() {
         val list = _state.value.selectedList ?: return
-        val loaded = runCatching { todoRepository.loadTasks(list) }.getOrNull() ?: return
+        val loaded = try {
+            todoRepository.loadTasks(list)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            return
+        }
         _state.update { current ->
-            val pendingTemporary = current.tasks.filter { it.startLine < 0 }
-            val merged = loaded + pendingTemporary
+            val merged = current.mergeOptimistic(loaded)
             current.withTasks(
                 tasks = merged,
                 pendingLines = current.pendingLines.filter { line ->
-                    line < 0 && merged.any { it.startLine == line }
+                    merged.any { todo -> todo.startLine == line }
                 }.toSet(),
             )
         }
     }
 
+    /**
+     * Keeps optimistic rows on top of freshly loaded file content. Positive
+     * lines are in-flight edits of existing todos; negative lines are pending
+     * additions that do not exist in the file yet.
+     */
+    private fun TasksUiState.mergeOptimistic(loaded: List<TodoItem>): List<TodoItem> {
+        val optimistic = tasks.filter { it.startLine in pendingLines }
+        if (optimistic.isEmpty()) return loaded
+        val byLine = optimistic.associateBy { it.startLine }
+        val merged = loaded.map { byLine[it.startLine] ?: it }
+        return merged + optimistic.filter { it.startLine < 0 }
+    }
+
+    /**
+     * Serialises writes and keeps the sync indicator alive until the write and
+     * its reconciliation have both finished.
+     */
+    private fun launchWrite(block: suspend () -> Unit) {
+        viewModelScope.launch {
+            try {
+                syncCoordinator.track {
+                    writeMutex.withLock { block() }
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                _state.update {
+                    it.copy(message = e.message ?: "Could not save the todo")
+                }
+            }
+        }
+    }
+
     private fun handleResult(result: TodoUpdateResult) {
         when (result) {
-            is TodoUpdateResult.Success -> Unit
+            is TodoUpdateResult.Success -> {
+                if (result.message.contains("index refresh failed", ignoreCase = true)) {
+                    _state.update { it.copy(message = result.message) }
+                }
+            }
+
             is TodoUpdateResult.Conflict -> _state.update { it.copy(message = result.message) }
             is TodoUpdateResult.Error -> _state.update { it.copy(message = result.message) }
         }

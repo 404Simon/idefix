@@ -37,10 +37,21 @@ data class TodoList(
                 .replace('/', '-')
                 .replace('\\', '-')
                 .replace(Regex("""\s+"""), " ")
+                .trimStart('.')
+                .trim()
+            val base = cleaned
+                .removeSuffix(".md")
+                .removeSuffix(".MD")
+                .removeSuffix(".TODO")
+                .removeSuffix(".todo")
+                .trim()
             return when {
-                cleaned.isBlank() || cleaned.equals("main", ignoreCase = true) -> MAIN_FILE
+                base.isBlank() ||
+                    base.equals("main", ignoreCase = true) ||
+                    base.equals("todo", ignoreCase = true) -> MAIN_FILE
+
                 isTodoFile(cleaned) -> cleaned
-                else -> "$cleaned$SUFFIX"
+                else -> "$base$SUFFIX"
             }
         }
     }

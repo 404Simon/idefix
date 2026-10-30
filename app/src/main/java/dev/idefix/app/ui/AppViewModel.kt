@@ -26,6 +26,7 @@ data class AppUiState(
     val startupError: String? = null,
     val indexState: IndexState = IndexState.Idle,
     val indexSummary: IndexSummary = IndexSummary(0, null, 0),
+    val isSyncing: Boolean = false,
     val message: String? = null,
     val versionName: String = BuildConfig.VERSION_NAME,
 )
@@ -54,6 +55,11 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
                 if (state is IndexState.Ready) {
                     refreshSummary()
                 }
+            }
+        }
+        viewModelScope.launch {
+            container.syncCoordinator.activeCount.collect { count ->
+                _uiState.update { it.copy(isSyncing = count > 0) }
             }
         }
     }
@@ -99,6 +105,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
             try {
                 val info = container.vaultRepository.adoptVault(uri, null)
                 if (previous != null && previous != uri) {
+                    container.indexRepository.cancel()
                     container.indexRepository.clearIndex()
                 }
                 _uiState.update { it.copy(phase = StartupPhase.READY, vault = info) }
@@ -128,6 +135,15 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         viewModelScope.launch {
             val hidden = container.settings.settings.first().includeHidden
             container.indexRepository.rebuild(hidden)
+            refreshSummary()
+        }
+    }
+
+    /** Scans the vault and updates the index cache without a full rebuild. */
+    fun reconcileIndex() {
+        viewModelScope.launch {
+            val hidden = container.settings.settings.first().includeHidden
+            container.indexRepository.reconcile(hidden)
             refreshSummary()
         }
     }
@@ -171,6 +187,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
 
     fun switchVault() {
         viewModelScope.launch {
+            container.indexRepository.cancel()
             container.vaultRepository.clearVault()
             container.indexRepository.clearIndex()
             _uiState.update {

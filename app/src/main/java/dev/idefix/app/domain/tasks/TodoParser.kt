@@ -14,7 +14,6 @@ import java.time.format.DateTimeParseException
  * - [ ] Buy milk
  *   due: 2026-10-30 18:00
  *   Oat milk, not soy.
- *
  * - [x] Finished task
  * ```
  *
@@ -36,6 +35,11 @@ object TodoParser {
         val title: String,
     )
 
+    data class Block(
+        val startLine: Int,
+        val endLine: Int,
+    )
+
     fun parseHeader(line: String): TaskHeader? {
         val match = taskLine.matchEntire(line) ?: return null
         return TaskHeader(
@@ -44,13 +48,49 @@ object TodoParser {
         )
     }
 
+    fun blocks(content: String): List<Block> = parseBlocks(content).map {
+        Block(startLine = it.startLine, endLine = it.endLine)
+    }
+
     fun parse(
         content: String,
         fileId: Long,
         uri: String,
         relativePath: String,
         filename: String,
-    ): List<TodoItem> {
+    ): List<TodoItem> = parseBlocks(content).map {
+        TodoItem(
+            fileId = fileId,
+            uri = uri,
+            relativePath = relativePath,
+            filename = filename,
+            startLine = it.startLine,
+            endLine = it.endLine,
+            title = it.title,
+            body = it.body.joinToString("\n").trimEnd(),
+            completed = it.completed,
+            due = it.due,
+        )
+    }
+
+    fun formatDue(value: LocalDateTime): String = value.format(dueFormatter)
+
+    fun parseDue(value: String): LocalDateTime? {
+        val trimmed = value.trim()
+        return sequenceOf(
+            { LocalDateTime.parse(trimmed, dueFormatter) },
+            { LocalDateTime.parse(trimmed, dueFormatterIso) },
+            { LocalDate.parse(trimmed, dateOnlyFormatter).atTime(LocalTime.of(23, 59)) },
+        ).mapNotNull { candidate ->
+            try {
+                candidate()
+            } catch (_: DateTimeParseException) {
+                null
+            }
+        }.firstOrNull()
+    }
+
+    private fun parseBlocks(content: String): List<BuiltTask> {
         val tasks = ArrayList<BuiltTask>()
         var builder: Builder? = null
         var lastContentLine = 0
@@ -117,38 +157,7 @@ object TodoParser {
             }
         }
         builder?.let { tasks.add(it.finish(lastContentLine)) }
-
-        return tasks.map {
-            TodoItem(
-                fileId = fileId,
-                uri = uri,
-                relativePath = relativePath,
-                filename = filename,
-                startLine = it.startLine,
-                endLine = it.endLine,
-                title = it.title,
-                body = it.body.joinToString("\n").trimEnd(),
-                completed = it.completed,
-                due = it.due,
-            )
-        }
-    }
-
-    fun formatDue(value: LocalDateTime): String = value.format(dueFormatter)
-
-    fun parseDue(value: String): LocalDateTime? {
-        val trimmed = value.trim()
-        return sequenceOf(
-            { LocalDateTime.parse(trimmed, dueFormatter) },
-            { LocalDateTime.parse(trimmed, dueFormatterIso) },
-            { LocalDate.parse(trimmed, dateOnlyFormatter).atTime(LocalTime.of(23, 59)) },
-        ).mapNotNull { candidate ->
-            try {
-                candidate()
-            } catch (_: DateTimeParseException) {
-                null
-            }
-        }.firstOrNull()
+        return tasks
     }
 
     private fun stripIndent(line: String): String = when {

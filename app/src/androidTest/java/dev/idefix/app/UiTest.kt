@@ -24,6 +24,7 @@ import dev.idefix.app.domain.model.SearchResult
 import dev.idefix.app.domain.model.ThemeMode
 import dev.idefix.app.domain.model.TodoItem
 import dev.idefix.app.ui.components.EmptyState
+import dev.idefix.app.ui.components.SyncAction
 import dev.idefix.app.ui.components.TodoRow
 import dev.idefix.app.ui.search.SearchScreen
 import dev.idefix.app.ui.search.SearchViewModel
@@ -94,7 +95,6 @@ class UiTest {
             IdefixTheme(ThemeMode.DARK, dynamicColor = false) {
                 TodoRow(
                     todo = todo,
-                    pending = false,
                     onToggle = { completedValue = it },
                     onClick = { opened = true },
                 )
@@ -121,9 +121,37 @@ class UiTest {
             due = null,
         )
         composeRule.setContent {
-            IdefixTheme { TodoRow(todo = todo, pending = false, onToggle = {}, onClick = {}) }
+            IdefixTheme { TodoRow(todo = todo, onToggle = {}, onClick = {}) }
         }
         composeRule.onNodeWithContentDescription("Todo: Finished").assertIsOn()
+    }
+
+    @Test
+    fun syncActionDistinguishesActiveSyncAndFailure() {
+        var syncing by mutableStateOf(true)
+        var cancellable by mutableStateOf(false)
+        var failed by mutableStateOf(false)
+        composeRule.setContent {
+            IdefixTheme {
+                SyncAction(
+                    isSyncing = syncing,
+                    onSync = {},
+                    failed = failed,
+                    onCancel = if (cancellable) ({}) else null,
+                )
+            }
+        }
+        composeRule.onNodeWithContentDescription("Syncing").assertIsDisplayed()
+
+        composeRule.runOnIdle { cancellable = true }
+        composeRule.onNodeWithContentDescription("Cancel sync").assertIsDisplayed()
+
+        composeRule.runOnIdle {
+            cancellable = false
+            syncing = false
+            failed = true
+        }
+        composeRule.onNodeWithContentDescription("Retry sync").assertIsDisplayed()
     }
 
     @Test
@@ -157,6 +185,7 @@ class UiTest {
                 SearchScreen(
                     state = state,
                     indexState = IndexState.Ready(1, System.currentTimeMillis()),
+                    isSyncing = false,
                     vaultName = "Test vault",
                     focusRequestToken = 0,
                     onCreateNamedNote = {},
@@ -190,6 +219,7 @@ class UiTest {
                 SearchScreen(
                     state = state,
                     indexState = IndexState.Ready(1, System.currentTimeMillis()),
+                    isSyncing = false,
                     vaultName = "Test vault",
                     focusRequestToken = 0,
                     onCreateNamedNote = {},
@@ -223,6 +253,7 @@ class UiTest {
                 SearchScreen(
                     state = state,
                     indexState = IndexState.Ready(1, System.currentTimeMillis()),
+                    isSyncing = false,
                     vaultName = "Test vault",
                     focusRequestToken = 0,
                     onCreateNamedNote = { created = it },
@@ -268,6 +299,7 @@ class UiTest {
                 SearchScreen(
                     state = state,
                     indexState = IndexState.Ready(1, System.currentTimeMillis()),
+                    isSyncing = false,
                     vaultName = "Test vault",
                     focusRequestToken = 0,
                     onCreateNamedNote = {},

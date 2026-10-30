@@ -10,42 +10,53 @@ sealed interface TodoWriteOutcome {
 }
 
 /**
- * Rewrites todo blocks while leaving every line outside the edited block
- * untouched. The format is described in [TodoParser].
+ * Rewrites todo blocks while leaving non-todo content untouched. Todo blocks
+ * are kept compact: consecutive tasks are separated by a single newline, and
+ * blank lines only survive inside a task body or around non-task content.
  */
 object TodoEditor {
 
     fun appendTask(content: String, draft: TodoDraft): TodoWriteOutcome {
         val newline = MarkdownLines.detectNewline(content)
         val block = renderBlock(draft, completed = false).joinToString(newline)
-        val updated = when {
-            content.isBlank() -> block + newline
-            content.endsWith("\n") -> {
-                val separator = if (content.endsWith("$newline$newline")) "" else newline
-                content + separator + block + newline
-            }
-
-            else -> content + newline + newline + block + newline
+        val existing = content.trimEnd()
+        if (existing.isEmpty()) {
+            return TodoWriteOutcome.Success(block + newline)
         }
-        return TodoWriteOutcome.Success(updated)
+        val lastTask = TodoParser.blocks(content).lastOrNull()
+        val lastLine = MarkdownLines.split(existing).size
+        val separator = if (lastTask?.endLine == lastLine) newline else newline + newline
+        val updated = existing + separator + block + newline
+        return TodoWriteOutcome.Success(normaliseSpacing(updated))
     }
 
     fun updateTask(
         content: String,
         task: TodoItem,
         draft: TodoDraft,
-    ): TodoWriteOutcome = rewriteTask(content, task, draft, task.completed)
+    ): TodoWriteOutcome {
+        val target = locateTask(content, task)
+            ?: return TodoWriteOutcome.Conflict("The task was changed in another app")
+        if (target.body != task.body || target.due != task.due) {
+            return TodoWriteOutcome.Conflict("The task was changed in another app")
+        }
+        return rewriteLocated(content, target, draft, target.completed)
+    }
 
     fun setCompleted(
         content: String,
         task: TodoItem,
         completed: Boolean,
-    ): TodoWriteOutcome = rewriteTask(
-        content = content,
-        task = task,
-        draft = TodoDraft(task.title, task.body, task.due),
-        completed = completed,
-    )
+    ): TodoWriteOutcome {
+        val target = locateTask(content, task)
+            ?: return TodoWriteOutcome.Conflict("The task was changed in another app")
+        return rewriteLocated(
+            content = content,
+            target = target,
+            draft = TodoDraft(target.title, target.body, target.due),
+            completed = completed,
+        )
+    }
 
     fun deleteTask(content: String, task: TodoItem): TodoWriteOutcome {
         val target = locateTask(content, task)
@@ -58,17 +69,17 @@ object TodoEditor {
         if (content.startsWith(newline, removeEnd)) {
             removeEnd += newline.length
         }
-        return TodoWriteOutcome.Success(content.removeRange(start, removeEnd))
+        return TodoWriteOutcome.Success(
+            normaliseSpacing(content.removeRange(start, removeEnd)),
+        )
     }
 
-    private fun rewriteTask(
+    private fun rewriteLocated(
         content: String,
-        task: TodoItem,
+        target: TodoItem,
         draft: TodoDraft,
         completed: Boolean,
     ): TodoWriteOutcome {
-        val target = locateTask(content, task)
-            ?: return TodoWriteOutcome.Conflict("The task was changed in another app")
         val ranges = MarkdownLines.split(content)
         val start = ranges[target.startLine - 1].start
         val end = ranges[target.endLine - 1].end
@@ -76,7 +87,9 @@ object TodoEditor {
         val trailingNewline = end < content.length || content.endsWith("\n")
         val block = renderBlock(draft, completed).joinToString(newline) +
             if (trailingNewline) newline else ""
-        return TodoWriteOutcome.Success(content.substring(0, start) + block + content.substring(end))
+        return TodoWriteOutcome.Success(
+            normaliseSpacing(content.substring(0, start) + block + content.substring(end)),
+        )
     }
 
     private fun locateTask(content: String, task: TodoItem): TodoItem? {
@@ -92,6 +105,38 @@ object TodoEditor {
                 it.title == task.title &&
                 it.completed == task.completed
         }
+    }
+
+    /**
+     * Keeps task blocks adjacent while preserving headings, paragraphs and any
+     * other content that a user may have placed around the list.
+     */
+    private fun normaliseSpacing(content: String): String {
+        val blocks = TodoParser.blocks(content)
+        if (blocks.isEmpty()) return content
+        val newline = MarkdownLines.detectNewline(content)
+        val lines = MarkdownLines.split(content).map { it.text }
+        val output = ArrayList<String>(lines.size)
+        var cursor = 0
+
+        blocks.forEachIndexed { index, block ->
+            val start = block.startLine - 1
+            val end = block.endLine - 1
+            val gap = lines.subList(cursor, start)
+            if (gap.any { it.isNotBlank() }) {
+                output += gap
+            }
+            output += lines.subList(start, end + 1)
+            cursor = end + 1
+        }
+
+        val trailing = lines.subList(cursor, lines.size)
+        if (trailing.any { it.isNotBlank() }) {
+            output += trailing
+        }
+
+        val joined = output.joinToString(newline)
+        return if (content.endsWith("\n")) joined + newline else joined
     }
 
     private fun renderBlock(draft: TodoDraft, completed: Boolean): List<String> {

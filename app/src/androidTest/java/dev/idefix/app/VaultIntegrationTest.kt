@@ -60,9 +60,10 @@ class VaultIntegrationTest {
         vault = SafVaultRepository(context, settings)
         val treeUri = DocumentsContract.buildTreeDocumentUri(TestDocumentsProvider.AUTHORITY, TestDocumentsProvider.ROOT_ID)
         vault.adoptVault(treeUri.toString(), "Test vault")
-        index = DefaultIndexRepository(db, vault)
+        val syncCoordinator = dev.idefix.app.sync.SyncCoordinator()
+        index = DefaultIndexRepository(db, vault, syncCoordinator)
         search = DefaultSearchRepository(db.fileDao(), db.ftsDao())
-        todos = DefaultTodoRepository(search, db.ftsDao(), vault, index)
+        todos = DefaultTodoRepository(search, db.ftsDao(), vault, index, syncCoordinator)
         recents = DefaultRecentFilesRepository(db.recentDao())
     }
 

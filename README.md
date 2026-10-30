@@ -136,11 +136,18 @@ indexing, search and todo work runs off the main thread with coroutines.
 
 - The database never replaces the Markdown file as the authoritative content.
 - Todo edits rewrite only the affected checkbox block after verifying that the
-  block still contains the expected title and completion state. Everything else
-  in the file, including its newline convention, is left untouched.
+  block still contains the expected title and completion state. Task blocks are
+  kept compact and consistently separated; headings, paragraphs and the file's
+  newline convention are preserved.
 - The full-text index doubles as the read cache for todo lists. Every todo write
   reindexes its file, and the normal index reconciliation updates the cache when
   files change outside the app.
+- The sync button in Tasks reconciles the vault index before refreshing the
+  view, so external Markdown changes are picked up. In the other direction,
+  todo actions already write to Markdown and refresh the index immediately.
+- A shared `SyncCoordinator` exposes one app-wide sync state. It covers full
+  index reconciliation as well as per-file reindexing and queued todo writes,
+  so Search and Tasks show the same spinner whenever background work is active.
 - Saves read the file from the provider first; an external change produces a
   conflict dialog with **Reload** and explicit **Overwrite** options.
 - A failed scan does not drop the previous index. Stale records are removed only

@@ -22,9 +22,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.NoteAdd
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.outlined.SearchOff
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -55,8 +53,6 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -72,6 +68,7 @@ import dev.idefix.app.ui.components.SearchField
 import dev.idefix.app.ui.components.SearchResultDivider
 import dev.idefix.app.ui.components.SearchResultRow
 import dev.idefix.app.ui.components.SectionLabel
+import dev.idefix.app.ui.components.SyncAction
 import dev.idefix.app.ui.components.relativeTime
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -79,6 +76,7 @@ import dev.idefix.app.ui.components.relativeTime
 fun SearchScreen(
     state: SearchUiState,
     indexState: IndexState,
+    isSyncing: Boolean,
     vaultName: String,
     focusRequestToken: Int,
     onCreateNamedNote: (String) -> Unit,
@@ -132,9 +130,10 @@ fun SearchScreen(
             },
             actions = {
                 SyncAction(
-                    indexState = indexState,
+                    isSyncing = isSyncing || indexState.isRunning,
                     onSync = onRebuild,
-                    onCancel = onCancelIndex,
+                    failed = indexState is IndexState.Failed,
+                    onCancel = if (indexState.isRunning) onCancelIndex else null,
                 )
                 Box {
                     IconButton(onClick = { menuOpen = true }) {
@@ -237,37 +236,6 @@ fun SearchScreen(
                 viewModel = viewModel,
                 modifier = Modifier.fillMaxSize(),
             )
-        }
-    }
-}
-
-@Composable
-private fun SyncAction(
-    indexState: IndexState,
-    onSync: () -> Unit,
-    onCancel: () -> Unit,
-) {
-    when (indexState) {
-        is IndexState.Running -> IconButton(
-            onClick = onCancel,
-            modifier = Modifier.semantics { contentDescription = "Cancel sync" },
-        ) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(20.dp),
-                strokeWidth = 2.dp,
-            )
-        }
-
-        is IndexState.Failed -> IconButton(onClick = onSync) {
-            Icon(
-                Icons.Default.Sync,
-                contentDescription = "Retry sync",
-                tint = MaterialTheme.colorScheme.error,
-            )
-        }
-
-        else -> IconButton(onClick = onSync) {
-            Icon(Icons.Default.Sync, contentDescription = "Sync vault")
         }
     }
 }

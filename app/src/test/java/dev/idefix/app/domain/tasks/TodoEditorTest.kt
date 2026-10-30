@@ -54,7 +54,7 @@ class TodoEditorTest {
 
         val outcome = TodoEditor.setCompleted(crlf, task, true) as TodoWriteOutcome.Success
 
-        assertEquals("- [x] First\r\n  Body.\r\n\r\n- [ ] Second\r\n", outcome.content)
+        assertEquals("- [x] First\r\n  Body.\r\n- [ ] Second\r\n", outcome.content)
     }
 
     @Test
@@ -65,6 +65,48 @@ class TodoEditorTest {
 
         assertTrue(outcome.content.startsWith("# TODO\n\n- [ ] Second"))
         assertTrue(outcome.content.endsWith("- [ ] Second\n  Keep me.\n"))
+    }
+
+    @Test
+    fun togglingKeepsExternalBodyAndDueChanges() {
+        val task = TodoParser.parse(content, 1, "content://1", "TODO.md", "TODO.md").first()
+        val externallyEdited = content
+            .replace("Body.", "Edited on desktop.")
+            .replace("2026-10-30 18:00", "2026-11-02 07:15")
+
+        val outcome = TodoEditor.setCompleted(
+            externallyEdited,
+            task,
+            true,
+        ) as TodoWriteOutcome.Success
+
+        assertTrue(outcome.content.contains("- [x] First"))
+        assertTrue(outcome.content.contains("  due: 2026-11-02 07:15"))
+        assertTrue(outcome.content.contains("  Edited on desktop."))
+    }
+
+    @Test
+    fun editingConflictsWhenTheBodyChangedExternally() {
+        val task = TodoParser.parse(content, 1, "content://1", "TODO.md", "TODO.md").first()
+        val externallyEdited = content.replace("Body.", "Edited on desktop.")
+
+        val outcome = TodoEditor.updateTask(
+            externallyEdited,
+            task,
+            TodoDraft("First", "New body.", null),
+        )
+
+        assertTrue(outcome is TodoWriteOutcome.Conflict)
+    }
+
+    @Test
+    fun normalisesMessySpacingAroundTheEditedBlock() {
+        val messy = "- [ ] First\n\n\n\n- [ ] Second\n\n\n- [ ] Third\n"
+        val task = TodoParser.parse(messy, 1, "content://1", "TODO.md", "TODO.md").first()
+
+        val outcome = TodoEditor.setCompleted(messy, task, true) as TodoWriteOutcome.Success
+
+        assertEquals("- [x] First\n- [ ] Second\n- [ ] Third\n", outcome.content)
     }
 
     @Test

@@ -13,7 +13,9 @@ import dev.idefix.app.domain.repository.VaultRepository
 import dev.idefix.app.domain.tasks.TodoEditor
 import dev.idefix.app.domain.tasks.TodoParser
 import dev.idefix.app.domain.tasks.TodoWriteOutcome
+import dev.idefix.app.sync.SyncCoordinator
 import dev.idefix.app.util.MimeTypes
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.time.LocalDateTime
@@ -29,6 +31,7 @@ class DefaultTodoRepository(
     private val ftsDao: FtsDao,
     private val vaultRepository: VaultRepository,
     private val indexRepository: IndexRepository,
+    private val syncCoordinator: SyncCoordinator,
 ) : TodoRepository {
 
     override suspend fun loadLists(): List<TodoList> = withContext(Dispatchers.IO) {
@@ -122,30 +125,34 @@ class DefaultTodoRepository(
         }
 
     override suspend fun createList(name: String): TodoUpdateResult =
-        withContext(Dispatchers.IO) {
-            try {
-                val filename = TodoList.fileNameFor(name)
-                if (vaultRepository.resolve(filename) != null) {
-                    return@withContext TodoUpdateResult.Conflict(
-                        "A list named ${TodoList.displayName(filename)} already exists",
+        syncCoordinator.track {
+            withContext(Dispatchers.IO) {
+                try {
+                    val filename = TodoList.fileNameFor(name)
+                    if (vaultRepository.resolve(filename) != null) {
+                        return@withContext TodoUpdateResult.Conflict(
+                            "A list named ${TodoList.displayName(filename)} already exists",
+                        )
+                    }
+                    val file = vaultRepository.createMarkdownFile(
+                        parentRelativePath = null,
+                        displayName = MimeTypes.normalizeMarkdownName(filename),
+                        content = "",
                     )
+                    val warning = runCatching { indexRepository.reindexFile(file) }.exceptionOrNull()
+                    TodoUpdateResult.Success(
+                        message = if (warning == null) {
+                            "Created ${TodoList.displayName(file.displayName)}"
+                        } else {
+                            "List created; index refresh failed: ${warning.message}"
+                        },
+                        relativePath = file.relativePath,
+                    )
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    TodoUpdateResult.Error(e.message ?: "Could not create the list")
                 }
-                val file = vaultRepository.createMarkdownFile(
-                    parentRelativePath = null,
-                    displayName = MimeTypes.normalizeMarkdownName(filename),
-                    content = "",
-                )
-                val warning = runCatching { indexRepository.reindexFile(file) }.exceptionOrNull()
-                TodoUpdateResult.Success(
-                    message = if (warning == null) {
-                        "Created ${TodoList.displayName(file.displayName)}"
-                    } else {
-                        "List created; index refresh failed: ${warning.message}"
-                    },
-                    relativePath = file.relativePath,
-                )
-            } catch (e: Exception) {
-                TodoUpdateResult.Error(e.message ?: "Could not create the list")
             }
         }
 
@@ -153,26 +160,30 @@ class DefaultTodoRepository(
         list: TodoList,
         message: String,
         edit: (String) -> TodoWriteOutcome,
-    ): TodoUpdateResult = try {
-        val file = resolveListFile(list)
-        val content = vaultRepository.readText(file)
-        when (val outcome = edit(content)) {
-            is TodoWriteOutcome.Conflict -> TodoUpdateResult.Conflict(outcome.message)
-            is TodoWriteOutcome.Success -> {
-                vaultRepository.writeText(file, outcome.content)
-                val warning = runCatching { indexRepository.reindexFile(file) }.exceptionOrNull()
-                TodoUpdateResult.Success(
-                    message = if (warning == null) {
-                        message
-                    } else {
-                        "$message; index refresh failed: ${warning.message}"
-                    },
-                    relativePath = file.relativePath,
-                )
+    ): TodoUpdateResult = syncCoordinator.track {
+        try {
+            val file = resolveListFile(list)
+            val content = vaultRepository.readText(file)
+            when (val outcome = edit(content)) {
+                is TodoWriteOutcome.Conflict -> TodoUpdateResult.Conflict(outcome.message)
+                is TodoWriteOutcome.Success -> {
+                    vaultRepository.writeText(file, outcome.content)
+                    val warning = runCatching { indexRepository.reindexFile(file) }.exceptionOrNull()
+                    TodoUpdateResult.Success(
+                        message = if (warning == null) {
+                            message
+                        } else {
+                            "$message; index refresh failed: ${warning.message}"
+                        },
+                        relativePath = file.relativePath,
+                    )
+                }
             }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            TodoUpdateResult.Error(e.message ?: "Could not update the todo list")
         }
-    } catch (e: Exception) {
-        TodoUpdateResult.Error(e.message ?: "Could not update the todo list")
     }
 
     private suspend fun readIndexedContent(
@@ -182,7 +193,13 @@ class DefaultTodoRepository(
         filename: String,
     ): String? {
         if (fileId > 0) {
-            runCatching { ftsDao.contentFor(fileId) }.getOrNull()?.let { return it }
+            try {
+                ftsDao.contentFor(fileId)?.let { return it }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // Fall through to the vault read.
+            }
         }
         val file = vaultRepository.resolve(relativePath)
             ?: VaultFile(
@@ -191,7 +208,13 @@ class DefaultTodoRepository(
                 displayName = filename,
                 uri = uri,
             )
-        return runCatching { vaultRepository.readText(file) }.getOrNull()
+        return try {
+            vaultRepository.readText(file)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
     }
 
     private suspend fun resolveListFile(list: TodoList): VaultFile =

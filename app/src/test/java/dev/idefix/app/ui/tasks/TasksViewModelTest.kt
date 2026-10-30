@@ -5,6 +5,8 @@ import dev.idefix.app.domain.model.TodoItem
 import dev.idefix.app.domain.model.TodoList
 import dev.idefix.app.domain.model.TodoUpdateResult
 import dev.idefix.app.domain.repository.TodoRepository
+import dev.idefix.app.sync.SyncCoordinator
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -36,7 +38,7 @@ class TasksViewModelTest {
 
     @Test
     fun addingATodoShowsTheRowBeforeTheWriteFinishes() = runTest(dispatcher.scheduler) {
-        val viewModel = TasksViewModel(FakeTodoRepository())
+        val viewModel = TasksViewModel(FakeTodoRepository(), SyncCoordinator())
         advanceUntilIdle()
         viewModel.selectList(viewModel.state.value.lists.first())
         advanceUntilIdle()
@@ -45,7 +47,7 @@ class TasksViewModelTest {
 
         val optimistic = viewModel.state.value.tasks.first { it.title == "New todo" }
         assertTrue(optimistic.startLine < 0)
-        assertTrue(viewModel.isPending(optimistic))
+        assertTrue(optimistic.startLine in viewModel.state.value.pendingLines)
 
         advanceUntilIdle()
 
@@ -55,8 +57,55 @@ class TasksViewModelTest {
     }
 
     @Test
+    fun aFailedWriteClearsThePendingOptimisticState() =
+        runTest(dispatcher.scheduler) {
+            val viewModel = TasksViewModel(FakeTodoRepository(failWrites = true), SyncCoordinator())
+            advanceUntilIdle()
+            viewModel.selectList(viewModel.state.value.lists.first())
+            advanceUntilIdle()
+
+            viewModel.saveTask(null, TodoDraft("Broken todo"))
+            assertTrue(viewModel.state.value.tasks.any { it.startLine < 0 })
+
+            advanceUntilIdle()
+
+            assertTrue(viewModel.state.value.pendingLines.isEmpty())
+            assertTrue(viewModel.state.value.tasks.isEmpty())
+        }
+
+    @Test
+    fun aRefreshDuringWritesKeepsOtherOptimisticRows() = runTest(dispatcher.scheduler) {
+        val repository = FakeTodoRepository()
+        repository.seedTasks(2)
+        val viewModel = TasksViewModel(repository, SyncCoordinator())
+        advanceUntilIdle()
+        viewModel.selectList(viewModel.state.value.lists.first())
+        advanceUntilIdle()
+
+        val gate = CompletableDeferred<Unit>()
+        repository.gate = gate
+        val first = viewModel.state.value.tasks.first { it.startLine == 1 }
+        val second = viewModel.state.value.tasks.first { it.startLine == 2 }
+        viewModel.toggle(first, true)
+        viewModel.toggle(second, true)
+        assertTrue(viewModel.state.value.tasks.all { it.completed })
+
+        viewModel.refresh()
+        advanceUntilIdle()
+
+        assertTrue(viewModel.state.value.tasks.all { it.completed })
+        assertTrue(viewModel.state.value.pendingLines.containsAll(listOf(1, 2)))
+
+        gate.complete(Unit)
+        advanceUntilIdle()
+
+        assertTrue(viewModel.state.value.tasks.all { it.completed })
+        assertTrue(viewModel.state.value.pendingLines.isEmpty())
+    }
+
+    @Test
     fun creatingAListShowsItBeforeTheFileExists() = runTest(dispatcher.scheduler) {
-        val viewModel = TasksViewModel(FakeTodoRepository())
+        val viewModel = TasksViewModel(FakeTodoRepository(), SyncCoordinator())
         advanceUntilIdle()
 
         viewModel.createList("job")
@@ -71,7 +120,9 @@ class TasksViewModelTest {
         assertEquals("job.TODO.md", viewModel.state.value.selectedList?.relativePath)
     }
 
-    private class FakeTodoRepository : TodoRepository {
+    private class FakeTodoRepository(
+        private val failWrites: Boolean = false,
+    ) : TodoRepository {
         private var lists = listOf(
             TodoList(
                 fileId = 1,
@@ -82,6 +133,13 @@ class TasksViewModelTest {
             ),
         )
         private val tasks = mutableMapOf<String, MutableList<TodoItem>>()
+        var gate: CompletableDeferred<Unit>? = null
+
+        fun seedTasks(count: Int) {
+            tasks["TODO.md"] = (1..count)
+                .map { todo(lists.first(), it, "Task $it") }
+                .toMutableList()
+        }
 
         override suspend fun loadLists(): List<TodoList> = lists
 
@@ -89,6 +147,7 @@ class TasksViewModelTest {
             tasks[list.relativePath].orEmpty()
 
         override suspend fun addTask(list: TodoList, draft: TodoDraft): TodoUpdateResult {
+            if (failWrites) error("write failed")
             val current = tasks.getOrPut(list.relativePath) { mutableListOf() }
             val line = current.size + 1
             current += todo(list, line, draft.title)
@@ -116,6 +175,7 @@ class TasksViewModelTest {
             task: TodoItem,
             completed: Boolean,
         ): TodoUpdateResult {
+            gate?.await()
             val current = tasks.getOrPut(list.relativePath) { mutableListOf() }
             current.replaceAll {
                 if (it.startLine == task.startLine) it.copy(completed = completed) else it

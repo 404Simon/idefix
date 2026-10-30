@@ -23,7 +23,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.outlined.Checklist
 import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material3.AlertDialog
@@ -56,19 +55,24 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.idefix.app.domain.model.IndexState
 import dev.idefix.app.domain.model.TodoItem
 import dev.idefix.app.domain.model.TodoList
 import dev.idefix.app.ui.components.EmptyState
 import dev.idefix.app.ui.components.ErrorState
 import dev.idefix.app.ui.components.LoadingState
+import dev.idefix.app.ui.components.SyncAction
 import dev.idefix.app.ui.components.TodoRow
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TasksScreen(
     state: TasksUiState,
+    indexState: IndexState,
+    isSyncing: Boolean,
     twoPane: Boolean,
-    onRefresh: () -> Unit,
+    onSync: () -> Unit,
+    onCancelSync: () -> Unit,
     viewModel: TasksViewModel,
     modifier: Modifier = Modifier,
 ) {
@@ -130,9 +134,12 @@ fun TasksScreen(
                     }
                 },
                 actions = {
-                    IconButton(onClick = onRefresh) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Refresh tasks")
-                    }
+                    SyncAction(
+                        isSyncing = isSyncing || indexState.isRunning,
+                        onSync = onSync,
+                        failed = indexState is IndexState.Failed,
+                        onCancel = if (indexState.isRunning) onCancelSync else null,
+                    )
                 },
                 windowInsets = WindowInsets(0),
                 colors = TopAppBarDefaults.topAppBarColors(
@@ -151,7 +158,7 @@ fun TasksScreen(
                             creatingPath = state.creatingListPath,
                             onSelect = viewModel::selectList,
                             onCreateList = { newListOpen = true },
-                            onRetry = onRefresh,
+                            onRetry = viewModel::refresh,
                             showHeader = true,
                             modifier = Modifier
                                 .widthIn(min = 260.dp, max = 340.dp)
@@ -169,7 +176,7 @@ fun TasksScreen(
                             TasksPane(
                                 state = state,
                                 showHeader = true,
-                                onRefresh = onRefresh,
+                                onRetry = viewModel::refresh,
                                 viewModel = viewModel,
                                 onEdit = { todo ->
                                     if (todo.startLine > 0) {
@@ -191,7 +198,7 @@ fun TasksScreen(
                     creatingPath = state.creatingListPath,
                     onSelect = viewModel::selectList,
                     onCreateList = { newListOpen = true },
-                    onRetry = onRefresh,
+                    onRetry = viewModel::refresh,
                     showHeader = false,
                     modifier = Modifier.weight(1f),
                 )
@@ -199,7 +206,7 @@ fun TasksScreen(
                 else -> TasksPane(
                     state = state,
                     showHeader = false,
-                    onRefresh = onRefresh,
+                    onRetry = viewModel::refresh,
                     viewModel = viewModel,
                     onEdit = { todo ->
                         if (todo.startLine > 0) {
@@ -427,7 +434,7 @@ private fun TodoListCard(
 private fun TasksPane(
     state: TasksUiState,
     showHeader: Boolean,
-    onRefresh: () -> Unit,
+    onRetry: () -> Unit,
     viewModel: TasksViewModel,
     onEdit: (TodoItem) -> Unit,
     modifier: Modifier = Modifier,
@@ -500,7 +507,7 @@ private fun TasksPane(
 
         when {
             state.isLoadingTasks && state.tasks.isEmpty() -> LoadingState("Loading todos…")
-            state.error != null && state.tasks.isEmpty() -> ErrorState(state.error, onRetry = onRefresh)
+            state.error != null && state.tasks.isEmpty() -> ErrorState(state.error, onRetry = onRetry)
             visible.isEmpty() -> EmptyState(
                 icon = Icons.Outlined.Checklist,
                 title = if (state.hideFuture) "Nothing due right now" else "No todos yet",
@@ -520,7 +527,6 @@ private fun TasksPane(
                 ) { todo ->
                     TodoRow(
                         todo = todo,
-                        pending = viewModel.isPending(todo),
                         onToggle = { completed -> viewModel.toggle(todo, completed) },
                         onClick = { onEdit(todo) },
                     )

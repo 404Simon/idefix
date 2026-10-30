@@ -118,7 +118,7 @@ fun IdefixApp(
     )
     val tasksViewModel: TasksViewModel = viewModel(
         factory = idefixViewModelFactory {
-            TasksViewModel(container.todoRepository)
+            TasksViewModel(container.todoRepository, container.syncCoordinator)
         },
     )
     val recentViewModel: RecentViewModel = viewModel(
@@ -462,8 +462,14 @@ fun IdefixApp(
                             } else if (section == AppSection.TASKS) {
                                 TasksScreen(
                                     state = tasksState,
+                                    indexState = appState.indexState,
+                                    isSyncing = appState.isSyncing,
                                     twoPane = twoPane,
-                                    onRefresh = tasksViewModel::refresh,
+                                    onSync = {
+                                        appViewModel.reconcileIndex()
+                                        tasksViewModel.refresh()
+                                    },
+                                    onCancelSync = appViewModel::cancelIndexing,
                                     viewModel = tasksViewModel,
                                 )
                             } else {
@@ -476,6 +482,7 @@ fun IdefixApp(
                                                 AppSection.SEARCH -> SearchScreen(
                                                     state = searchState,
                                                     indexState = appState.indexState,
+                                                    isSyncing = appState.isSyncing,
                                                     vaultName = appState.vault?.displayName ?: "Vault",
                                                     focusRequestToken = searchFocusToken,
                                                     onCreateNamedNote = ::createNote,

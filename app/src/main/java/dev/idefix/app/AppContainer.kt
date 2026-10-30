@@ -14,13 +14,19 @@ import dev.idefix.app.domain.repository.SearchRepository
 import dev.idefix.app.domain.repository.SettingsRepository
 import dev.idefix.app.domain.repository.TodoRepository
 import dev.idefix.app.domain.repository.VaultRepository
+import dev.idefix.app.sync.SyncCoordinator
 
 /** Manual dependency container. One instance per application process. */
 class AppContainer(context: Context) {
     val settings: SettingsRepository = DataStoreSettingsRepository(context)
     val database: IdefixDatabase = IdefixDatabase.build(context)
+    val syncCoordinator = SyncCoordinator()
     val vaultRepository: VaultRepository = SafVaultRepository(context, settings)
-    val indexRepository: IndexRepository = DefaultIndexRepository(database, vaultRepository)
+    val indexRepository: IndexRepository = DefaultIndexRepository(
+        database = database,
+        vaultRepository = vaultRepository,
+        syncCoordinator = syncCoordinator,
+    )
     val searchRepository: SearchRepository = DefaultSearchRepository(
         fileDao = database.fileDao(),
         ftsDao = database.ftsDao(),
@@ -30,6 +36,7 @@ class AppContainer(context: Context) {
         ftsDao = database.ftsDao(),
         vaultRepository = vaultRepository,
         indexRepository = indexRepository,
+        syncCoordinator = syncCoordinator,
     )
     val recentFilesRepository: RecentFilesRepository = DefaultRecentFilesRepository(database.recentDao())
     fun updateRecentLimit(limit: Int) {
