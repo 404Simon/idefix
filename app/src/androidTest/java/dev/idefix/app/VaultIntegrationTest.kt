@@ -250,6 +250,21 @@ class VaultIntegrationTest {
     }
 
     @Test
+    fun reconcileOnlyReindexesChangedFiles() = runBlocking {
+        val initial = index.rebuild(false)
+        assertTrue(initial.indexed > 0)
+
+        val unchanged = index.reconcile(false)
+        assertEquals(0, unchanged.indexed)
+        assertEquals(0, unchanged.removed)
+
+        File(vaultDir, projectPath).appendText("\nA fresh line.\n")
+        val changed = index.reconcile(false)
+        assertEquals(1, changed.indexed)
+        assertEquals(0, changed.removed)
+    }
+
+    @Test
     fun indexCanBeRebuiltAfterDatabaseClear() = runBlocking {
         index.rebuild(false)
         assertTrue(search.summary().fileCount > 0)

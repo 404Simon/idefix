@@ -104,7 +104,9 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
                 _uiState.update { it.copy(phase = StartupPhase.READY, vault = info) }
                 refreshSummary()
                 val hidden = container.settings.settings.first().includeHidden
-                container.indexRepository.rebuild(hidden)
+                // A different vault was cleared above, so this indexes everything
+                // once. Re-selecting the same vault only touches changed files.
+                container.indexRepository.reconcile(hidden)
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(
@@ -137,7 +139,9 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
     fun setIncludeHidden(enabled: Boolean) {
         viewModelScope.launch {
             container.settings.setIncludeHidden(enabled)
-            container.indexRepository.rebuild(enabled)
+            // Toggling hidden files changes which paths are scanned, not the
+            // contents of every note, so reconcile instead of rebuilding.
+            container.indexRepository.reconcile(enabled)
             refreshSummary()
         }
     }

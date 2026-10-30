@@ -8,8 +8,14 @@ import kotlinx.coroutines.flow.StateFlow
 interface IndexRepository {
     val state: StateFlow<IndexState>
 
+    /** Scans and re-reads every file, even when its metadata looks unchanged. */
     suspend fun rebuild(includeHidden: Boolean): IndexResult
 
+    /**
+     * Scans the vault but only reads files whose URI/path, modification time,
+     * size or index status changed. Unchanged files keep their existing row and
+     * full-text entry.
+     */
     suspend fun reconcile(includeHidden: Boolean): IndexResult
 
     suspend fun reindexFile(file: VaultFile)
