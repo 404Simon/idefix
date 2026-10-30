@@ -22,6 +22,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.NoteAdd
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.DateRange
@@ -69,6 +70,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.idefix.app.domain.model.IndexState
 import dev.idefix.app.domain.model.RecentFile
+import dev.idefix.app.domain.model.SearchCommand
 import dev.idefix.app.domain.model.SearchMode
 import dev.idefix.app.domain.model.SearchResult
 import dev.idefix.app.ui.components.EmptyState
@@ -91,6 +93,7 @@ fun SearchScreen(
     vaultName: String,
     focusRequestToken: Int,
     onCreateNote: () -> Unit,
+    onCreateNamedNote: (String) -> Unit,
     onOpenFileBrowser: () -> Unit,
     onSwitchVault: () -> Unit,
     onOpenResult: (SearchResult) -> Unit,
@@ -110,6 +113,7 @@ fun SearchScreen(
 
     LaunchedEffect(focusRequestToken) {
         if (focusRequestToken > 0) {
+            viewModel.rearmCommand()
             focusRequester.requestFocus()
             keyboard?.show()
         }
@@ -179,12 +183,21 @@ fun SearchScreen(
                 .fillMaxWidth()
                 .padding(horizontal = 12.dp)
                 .onPreviewKeyEvent { event ->
-                    if (event.type == KeyEventType.KeyDown && event.key == Key.Escape && fieldFocused) {
-                        focusManager.clearFocus()
-                        resultsFocusRequester.requestFocus()
-                        true
-                    } else {
-                        false
+                    if (event.type != KeyEventType.KeyDown || !fieldFocused) return@onPreviewKeyEvent false
+                    when {
+                        state.query.isEmpty() &&
+                            (event.key == Key.Backspace || event.key == Key.Delete) -> {
+                            viewModel.resetFilter()
+                            true
+                        }
+
+                        event.key == Key.Escape -> {
+                            focusManager.clearFocus()
+                            resultsFocusRequester.requestFocus()
+                            true
+                        }
+
+                        else -> false
                     }
                 },
         ) {
@@ -192,9 +205,17 @@ fun SearchScreen(
                 value = state.query,
                 onValueChange = { viewModel.setQuery(it) },
                 onSubmit = {
-                    viewModel.submit()
-                    if (!state.isSearching && state.searchedQuery == state.query.trim()) {
-                        state.selectedResult?.let(onOpenResult)
+                    if (state.creatingNote) {
+                        val name = state.newNoteName
+                        if (name.isNotBlank()) {
+                            viewModel.clearQuery()
+                            onCreateNamedNote(name)
+                        }
+                    } else {
+                        viewModel.submit()
+                        if (!state.isSearching && state.searchedQuery == state.query.trim()) {
+                            state.selectedResult?.let(onOpenResult)
+                        }
                     }
                 },
                 onClear = {
@@ -203,51 +224,15 @@ fun SearchScreen(
                 },
                 focusRequester = focusRequester,
                 modifier = Modifier.onFocusChanged { fieldFocused = it.isFocused },
+                placeholder = state.placeholder,
+                resetToken = state.commandRevision,
             )
             Spacer(Modifier.height(8.dp))
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                SearchMode.entries.forEach { mode ->
-                    FilterChip(
-                        selected = state.mode == mode,
-                        onClick = { viewModel.setMode(mode) },
-                        label = { Text(mode.label, style = MaterialTheme.typography.labelMedium) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
-                            selectedLabelColor = MaterialTheme.colorScheme.primary,
-                        ),
-                    )
-                }
-                IconButton(
-                    onClick = { viewModel.setCaseSensitive(!state.caseSensitive) },
-                    enabled = state.mode == SearchMode.LITERAL || state.mode == SearchMode.REGEX,
-                ) {
-                    Text(
-                        text = "Aa",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = if (state.caseSensitive) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                    )
-                }
-            }
-            Text(
-                text = state.mode.hint + if (state.mode == SearchMode.REGEX || state.mode == SearchMode.LITERAL) {
-                    if (state.caseSensitive) " · case sensitive" else " · case insensitive"
-                } else {
-                    ""
-                },
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 2.dp, bottom = 8.dp),
+            CommandBar(
+                state = state,
+                onCommand = viewModel::applyCommand,
             )
+            Spacer(Modifier.height(8.dp))
             IndexStatusRow(
                 indexState = indexState,
                 summary = state.summary,
@@ -257,7 +242,18 @@ fun SearchScreen(
             Spacer(Modifier.height(6.dp))
         }
 
-        if (state.query.isBlank()) {
+        if (state.creatingNote) {
+            CreateNotePanel(
+                slug = state.newNoteName,
+                onCreate = {
+                    if (state.newNoteName.isNotBlank()) {
+                        viewModel.clearQuery()
+                        onCreateNamedNote(state.newNoteName)
+                    }
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else if (state.query.isBlank()) {
             SearchLanding(
                 state = state,
                 onOpenRecent = onOpenRecent,
@@ -274,6 +270,97 @@ fun SearchScreen(
                 viewModel = viewModel,
                 modifier = Modifier.fillMaxSize(),
             )
+        }
+    }
+}
+
+@Composable
+private fun CommandBar(
+    state: SearchUiState,
+    onCommand: (SearchCommand) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        SearchCommand.entries.forEach { command ->
+            val selected = when (command) {
+                SearchCommand.FILENAME -> state.mode == SearchMode.FILENAME && !state.prefixOnly && !state.creatingNote
+                SearchCommand.GREP -> state.mode == SearchMode.TEXT && !state.creatingNote
+                SearchCommand.NEW_NOTE -> state.creatingNote
+                SearchCommand.MODUL -> state.prefixOnly
+            }
+            FilterChip(
+                selected = selected,
+                onClick = { onCommand(command) },
+                label = {
+                    Text(
+                        text = "${command.key}  ${command.label}",
+                        style = MaterialTheme.typography.labelMedium,
+                    )
+                },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
+                    selectedLabelColor = MaterialTheme.colorScheme.primary,
+                ),
+            )
+        }
+    }
+}
+
+@Composable
+private fun CreateNotePanel(
+    slug: String,
+    onCreate: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        modifier = modifier.padding(horizontal = 12.dp),
+    ) {
+        Spacer(Modifier.height(8.dp))
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
+            shape = RoundedCornerShape(14.dp),
+            onClick = onCreate,
+            enabled = slug.isNotBlank(),
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(34.dp)
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.16f)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Outlined.NoteAdd,
+                        contentDescription = null,
+                        modifier = Modifier.size(19.dp),
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = if (slug.isBlank()) "Type a title" else "$slug.md",
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = "Enter to create",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
         }
     }
 }

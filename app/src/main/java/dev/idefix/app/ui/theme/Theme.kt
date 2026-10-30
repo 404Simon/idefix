@@ -48,6 +48,45 @@ private val DarkColors = darkColorScheme(
     onErrorContainer = Color(0xFFFFDAD5),
 )
 
+private val MatchaDarkColors = darkColorScheme(
+    primary = MatchaAccent,
+    onPrimary = MatchaBackground,
+    primaryContainer = MatchaSelected,
+    onPrimaryContainer = Color(0xFFE2F5BC),
+    inversePrimary = Color(0xFF16715F),
+    secondary = MatchaGreen,
+    onSecondary = MatchaBackground,
+    secondaryContainer = Color(0xFF17483A),
+    onSecondaryContainer = Color(0xFFCCF5D8),
+    tertiary = MatchaYellow,
+    onTertiary = MatchaBackground,
+    tertiaryContainer = Color(0xFF4A441F),
+    onTertiaryContainer = Color(0xFFF2ECB6),
+    background = MatchaBackground,
+    onBackground = MatchaText,
+    surface = MatchaSurface,
+    onSurface = MatchaText,
+    surfaceVariant = MatchaOverlay,
+    onSurfaceVariant = MatchaMuted,
+    surfaceTint = MatchaAccent,
+    surfaceDim = MatchaBackground,
+    surfaceBright = Color(0xFF1F2C2E),
+    surfaceContainerLowest = MatchaBackground,
+    surfaceContainerLow = MatchaSurface,
+    surfaceContainer = MatchaOverlay,
+    surfaceContainerHigh = Color(0xFF141F21),
+    surfaceContainerHighest = Color(0xFF1A2628),
+    inverseSurface = MatchaText,
+    inverseOnSurface = MatchaBackground,
+    outline = MatchaComment,
+    outlineVariant = MatchaBorder,
+    scrim = Color(0xFF000000),
+    error = MatchaRed,
+    onError = MatchaBackground,
+    errorContainer = Color(0xFF5A1F1B),
+    onErrorContainer = Color(0xFFFFDAD5),
+)
+
 private val LightColors = lightColorScheme(
     primary = AmberDark,
     onPrimary = Color(0xFFFFFFFF),
@@ -78,18 +117,19 @@ private val LightColors = lightColorScheme(
 
 @Composable
 fun IdefixTheme(
-    themeMode: ThemeMode = ThemeMode.DARK,
+    themeMode: ThemeMode = ThemeMode.MATCHA,
     dynamicColor: Boolean = true,
     content: @Composable () -> Unit,
 ) {
     val systemDark = isSystemInDarkTheme()
     val dark = when (themeMode) {
         ThemeMode.SYSTEM -> systemDark
-        ThemeMode.DARK -> true
+        ThemeMode.DARK, ThemeMode.MATCHA -> true
         ThemeMode.LIGHT -> false
     }
     val context = LocalContext.current
     val colors = when {
+        themeMode == ThemeMode.MATCHA -> MatchaDarkColors
         dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
             if (dark) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
 

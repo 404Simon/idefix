@@ -21,15 +21,18 @@ class FakeSearchRepository(
 ) : SearchRepository {
     var lastQuery: String? = null
     var lastMode: SearchMode? = null
+    var lastPrefixOnly: Boolean? = null
 
     override suspend fun search(
         query: String,
         mode: SearchMode,
         caseSensitive: Boolean,
         limit: Int,
+        prefixOnly: Boolean,
     ): SearchOutcome {
         lastQuery = query
         lastMode = mode
+        lastPrefixOnly = prefixOnly
         return SearchOutcome(
             query = query,
             mode = mode,

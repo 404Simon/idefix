@@ -3,7 +3,7 @@ package dev.idefix.app.domain.model
 data class AppSettings(
     val vaultUri: String? = null,
     val vaultName: String? = null,
-    val themeMode: ThemeMode = ThemeMode.DARK,
+    val themeMode: ThemeMode = ThemeMode.MATCHA,
     val includeHidden: Boolean = false,
     val caseSensitiveSearch: Boolean = false,
     val dynamicColor: Boolean = true,

@@ -10,6 +10,7 @@ interface SearchRepository {
         mode: SearchMode,
         caseSensitive: Boolean,
         limit: Int = 100,
+        prefixOnly: Boolean = false,
     ): SearchOutcome
 
     suspend fun browseFiles(query: String? = null): List<FileSummary>

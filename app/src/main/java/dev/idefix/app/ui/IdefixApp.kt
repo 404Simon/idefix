@@ -475,6 +475,7 @@ fun IdefixApp(
                                                     vaultName = appState.vault?.displayName ?: "Vault",
                                                     focusRequestToken = searchFocusToken,
                                                     onCreateNote = { showCreateNote = true },
+                                                    onCreateNamedNote = ::createNote,
                                                     onOpenFileBrowser = { showFileBrowser = true },
                                                     onSwitchVault = { vaultPicker.launch(null) },
                                                     onOpenResult = ::openSearchResult,

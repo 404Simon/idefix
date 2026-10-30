@@ -61,6 +61,9 @@ storage permission is requested.
 
 ## Features
 
+- Neovim-style first-key search commands when the field is empty: `f` filename,
+  `g` full-text grep, `n` new note from a slugified title, `m` files starting
+  with `Modul_`. The same commands are available as touch chips.
 - Fuzzy filename search, ranked exact → prefix → contains → subsequence/fuzzy.
 - FTS5 full-text search with relevance ranking and snippets, using the bundled
   SQLite driver (FTS5 support is verified by an instrumentation test).
@@ -82,8 +85,9 @@ storage permission is requested.
 - Adaptive Material 3 layout: bottom navigation below 840dp, navigation rail and
   list/detail panes from 840dp; two panes from 600dp. Both folded/cover and
   unfolded/inner layouts are usable.
-- Dark theme by default; system and light themes, plus dynamic Material You color,
-  are selectable.
+- Matcha dark sea theme by default (the btop palette), with a true-black canvas
+  and near-black sea-glass surfaces for AMOLED displays; system, light and the
+  original dark theme, plus dynamic Material You color, are selectable.
 - Keyboard shortcuts: `Ctrl+K` search, `Ctrl+S` save, `Ctrl+F` find in note,
   `Escape` close/back, arrow keys and `Enter` in search results.
 

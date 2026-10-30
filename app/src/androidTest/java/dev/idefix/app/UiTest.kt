@@ -140,6 +140,113 @@ class UiTest {
     }
 
     @Test
+    fun firstKeyGSelectsGrepAndIsNotPartOfTheQuery() {
+        val searchRepo = FakeSearchRepository(fileCount = 1)
+        val viewModel = SearchViewModel(
+            searchRepository = searchRepo,
+            recentFilesRepository = FakeRecentFilesRepository(),
+            settingsRepository = FakeSettingsRepository(AppSettings()),
+        )
+        composeRule.setContent {
+            val state by viewModel.state.collectAsState()
+            IdefixTheme(ThemeMode.DARK, dynamicColor = false) {
+                SearchScreen(
+                    state = state,
+                    indexState = IndexState.Ready(1, System.currentTimeMillis()),
+                    vaultName = "Test vault",
+                    focusRequestToken = 0,
+                    onCreateNote = {},
+                    onCreateNamedNote = {},
+                    onOpenFileBrowser = {},
+                    onSwitchVault = {},
+                    onOpenResult = {},
+                    onOpenRecent = {},
+                    onRebuild = {},
+                    onCancelIndex = {},
+                    viewModel = viewModel,
+                )
+            }
+        }
+        composeRule.onNode(hasSetTextAction()).performTextInput("g")
+        composeRule.onNode(hasSetTextAction()).performTextInput("walrus")
+        composeRule.waitUntil(timeoutMillis = 5_000) { searchRepo.lastQuery == "walrus" }
+        assertEquals(SearchMode.TEXT, searchRepo.lastMode)
+        assertEquals("walrus", searchRepo.lastQuery)
+    }
+
+    @Test
+    fun firstKeyMSearchesTheModulPrefix() {
+        val searchRepo = FakeSearchRepository(fileCount = 1)
+        val viewModel = SearchViewModel(
+            searchRepository = searchRepo,
+            recentFilesRepository = FakeRecentFilesRepository(),
+            settingsRepository = FakeSettingsRepository(AppSettings()),
+        )
+        composeRule.setContent {
+            val state by viewModel.state.collectAsState()
+            IdefixTheme(ThemeMode.DARK, dynamicColor = false) {
+                SearchScreen(
+                    state = state,
+                    indexState = IndexState.Ready(1, System.currentTimeMillis()),
+                    vaultName = "Test vault",
+                    focusRequestToken = 0,
+                    onCreateNote = {},
+                    onCreateNamedNote = {},
+                    onOpenFileBrowser = {},
+                    onSwitchVault = {},
+                    onOpenResult = {},
+                    onOpenRecent = {},
+                    onRebuild = {},
+                    onCancelIndex = {},
+                    viewModel = viewModel,
+                )
+            }
+        }
+        composeRule.onNode(hasSetTextAction()).performTextInput("m")
+        composeRule.waitUntil(timeoutMillis = 5_000) { searchRepo.lastQuery == "Modul_" }
+        assertEquals(SearchMode.FILENAME, searchRepo.lastMode)
+        assertEquals(true, searchRepo.lastPrefixOnly)
+    }
+
+    @Test
+    fun firstKeyNCreatesASlugifiedNote() {
+        val searchRepo = FakeSearchRepository(fileCount = 1)
+        val viewModel = SearchViewModel(
+            searchRepository = searchRepo,
+            recentFilesRepository = FakeRecentFilesRepository(),
+            settingsRepository = FakeSettingsRepository(AppSettings()),
+        )
+        var created: String? = null
+        composeRule.setContent {
+            val state by viewModel.state.collectAsState()
+            IdefixTheme(ThemeMode.DARK, dynamicColor = false) {
+                SearchScreen(
+                    state = state,
+                    indexState = IndexState.Ready(1, System.currentTimeMillis()),
+                    vaultName = "Test vault",
+                    focusRequestToken = 0,
+                    onCreateNote = {},
+                    onCreateNamedNote = { created = it },
+                    onOpenFileBrowser = {},
+                    onSwitchVault = {},
+                    onOpenResult = {},
+                    onOpenRecent = {},
+                    onRebuild = {},
+                    onCancelIndex = {},
+                    viewModel = viewModel,
+                )
+            }
+        }
+        composeRule.onNode(hasSetTextAction()).performTextInput("n")
+        composeRule.onNode(hasSetTextAction()).performTextInput("Über Größe")
+        composeRule.waitUntil(timeoutMillis = 5_000) {
+            composeRule.onAllNodesWithText("Ueber_Groesse.md").fetchSemanticsNodes().isNotEmpty()
+        }
+        composeRule.onNodeWithText("Ueber_Groesse.md").performClick()
+        assertEquals("Ueber_Groesse", created)
+    }
+
+    @Test
     fun searchInteractionShowsResultsAndOpensThem() {
         val result = SearchResult(
             fileId = 9,
@@ -166,6 +273,7 @@ class UiTest {
                     vaultName = "Test vault",
                     focusRequestToken = 0,
                     onCreateNote = {},
+                    onCreateNamedNote = {},
                     onOpenFileBrowser = {},
                     onSwitchVault = {},
                     onOpenResult = { opened = it },

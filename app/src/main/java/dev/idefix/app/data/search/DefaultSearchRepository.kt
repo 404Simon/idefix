@@ -32,6 +32,7 @@ class DefaultSearchRepository(
         mode: SearchMode,
         caseSensitive: Boolean,
         limit: Int,
+        prefixOnly: Boolean,
     ): SearchOutcome = withContext(Dispatchers.IO) {
         val started = System.currentTimeMillis()
         val trimmed = query.trim()
@@ -41,7 +42,7 @@ class DefaultSearchRepository(
         try {
             currentCoroutineContext().ensureActive()
             val results = when (mode) {
-                SearchMode.FILENAME -> filenameSearch(trimmed, limit)
+                SearchMode.FILENAME -> filenameSearch(trimmed, limit, prefixOnly)
                 SearchMode.TEXT -> fullTextSearch(trimmed, limit)
                 SearchMode.LITERAL -> contentSearch(trimmed, caseSensitive, limit, regex = false)
                 SearchMode.REGEX -> contentSearch(trimmed, caseSensitive, limit, regex = true)
@@ -71,10 +72,11 @@ class DefaultSearchRepository(
         }
     }
 
-    private suspend fun filenameSearch(query: String, limit: Int): List<SearchResult> {
+    private suspend fun filenameSearch(query: String, limit: Int, prefixOnly: Boolean): List<SearchResult> {
         val files = fileDao.getAll()
         val scored = ArrayList<Pair<dev.idefix.app.data.database.FileEntity, Double>>()
         for (file in files) {
+            if (prefixOnly && !file.filename.startsWith(query, ignoreCase = true)) continue
             val score = FilenameMatcher.score(query, file.filename, file.relativePath)
             if (score >= FilenameMatcher.MIN_SCORE) scored += file to score
         }

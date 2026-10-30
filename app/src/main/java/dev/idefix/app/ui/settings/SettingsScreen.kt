@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.os.Build
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Column
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ContentCopy
@@ -148,7 +150,12 @@ fun SettingsScreen(
                         style = MaterialTheme.typography.titleSmall,
                     )
                     Spacer(Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
                         ThemeMode.entries.forEach { mode ->
                             FilterChip(
                                 selected = settings.themeMode == mode,
@@ -159,6 +166,7 @@ fun SettingsScreen(
                                             ThemeMode.SYSTEM -> "System"
                                             ThemeMode.DARK -> "Dark"
                                             ThemeMode.LIGHT -> "Light"
+                                            ThemeMode.MATCHA -> "Matcha"
                                         },
                                     )
                                 },
@@ -172,7 +180,7 @@ fun SettingsScreen(
                     Spacer(Modifier.height(6.dp))
                     SwitchRow(
                         title = "Dynamic color",
-                        description = "Use the wallpaper palette on Android 12 and newer.",
+                        description = "Use the wallpaper palette on Android 12 and newer. The Matcha theme always keeps its own palette.",
                         checked = settings.dynamicColor,
                         onCheckedChange = onDynamicColor,
                     )

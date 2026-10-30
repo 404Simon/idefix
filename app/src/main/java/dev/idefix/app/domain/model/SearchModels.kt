@@ -28,6 +28,28 @@ enum class SearchMode {
     }
 }
 
+/**
+ * Commands bound to the first key typed into an empty search field. The key is
+ * consumed and arms the matching search mode, mirroring the Neovim dashboard.
+ */
+enum class SearchCommand(
+    val key: Char,
+    val label: String,
+    val description: String,
+) {
+    FILENAME('f', "Filename", "Search file names"),
+    GREP('g', "Grep", "Search note contents"),
+    NEW_NOTE('n', "New note", "Create a note from the title"),
+    MODUL('m', "Modul_", "Files starting with Modul_"),
+    ;
+
+    companion object {
+        fun fromKey(key: Char): SearchCommand? = entries.firstOrNull { it.key == key.lowercaseChar() }
+    }
+}
+
+const val MODUL_PREFIX = "Modul_"
+
 const val SNIPPET_HIGHLIGHT_START = '\u0001'
 const val SNIPPET_HIGHLIGHT_END = '\u0002'
 
