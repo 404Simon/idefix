@@ -1,38 +1,39 @@
 package dev.idefix.app.ui.tasks
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.outlined.Checklist
-import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.FilterList
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -42,6 +43,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -51,53 +53,79 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import dev.idefix.app.domain.model.FileSummary
-import dev.idefix.app.domain.model.TaskFilter
-import dev.idefix.app.domain.model.TaskItem
+import dev.idefix.app.domain.model.TodoItem
+import dev.idefix.app.domain.model.TodoList
 import dev.idefix.app.ui.components.EmptyState
 import dev.idefix.app.ui.components.ErrorState
 import dev.idefix.app.ui.components.LoadingState
-import dev.idefix.app.ui.components.TaskRow
-import kotlinx.coroutines.delay
+import dev.idefix.app.ui.components.TodoRow
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TasksScreen(
     state: TasksUiState,
-    onOpenTask: (TaskItem) -> Unit,
+    twoPane: Boolean,
     onRefresh: () -> Unit,
     viewModel: TasksViewModel,
     modifier: Modifier = Modifier,
 ) {
-    var addOpen by remember { mutableStateOf(false) }
+    var editorOpen by remember { mutableStateOf(false) }
+    var editingTodo by remember { mutableStateOf<TodoItem?>(null) }
+    var newListOpen by remember { mutableStateOf(false) }
 
-    LaunchedEffect(state.message) {
-        if (state.message != null) {
-            delay(3500)
-            viewModel.consumeMessage()
+    LaunchedEffect(twoPane, state.lists, state.selectedList) {
+        if (twoPane && state.selectedList == null && state.lists.isNotEmpty()) {
+            viewModel.selectList(state.lists.first())
         }
+    }
+    BackHandler(enabled = !twoPane && state.selectedList != null) {
+        viewModel.backToList()
+    }
+
+    fun openAddTodo() {
+        editingTodo = null
+        editorOpen = true
     }
 
     Box(modifier = modifier.fillMaxSize()) {
         Column(modifier = Modifier.fillMaxSize()) {
             TopAppBar(
+                navigationIcon = {
+                    if (!twoPane && state.selectedList != null) {
+                        IconButton(onClick = viewModel::backToList) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to lists")
+                        }
+                    }
+                },
                 title = {
                     Column {
-                        Text("Tasks", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                         Text(
-                            text = "${state.openCount} open · ${state.completedCount} done" +
-                                if (state.overdueCount > 0) " · ${state.overdueCount} overdue" else "",
+                            text = if (!twoPane && state.selectedList != null) {
+                                state.selectedList.name
+                            } else {
+                                "Tasks"
+                            },
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            text = if (state.selectedList != null) {
+                                "${state.selectedList.relativePath} · ${state.openCount} open" +
+                                    if (state.overdueCount > 0) " · ${state.overdueCount} overdue" else ""
+                            } else {
+                                "${state.lists.size} lists"
+                            },
                             style = MaterialTheme.typography.labelSmall,
                             color = if (state.overdueCount > 0) {
                                 MaterialTheme.colorScheme.error
                             } else {
                                 MaterialTheme.colorScheme.onSurfaceVariant
                             },
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
                         )
                     }
                 },
@@ -107,109 +135,90 @@ fun TasksScreen(
                     }
                 },
                 windowInsets = WindowInsets(0),
-            colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.background),
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background,
+                ),
             )
 
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                TaskFilter.entries.forEach { filter ->
-                    FilterChip(
-                        selected = state.filter == filter,
-                        onClick = { viewModel.setFilter(filter) },
-                        label = {
-                            Text(
-                                text = filter.label + when (filter) {
-                                    TaskFilter.OPEN -> " ${state.openCount}"
-                                    TaskFilter.COMPLETED -> " ${state.completedCount}"
-                                    TaskFilter.OVERDUE -> if (state.overdueCount > 0) " ${state.overdueCount}" else ""
-                                    else -> ""
-                                },
-                                style = MaterialTheme.typography.labelMedium,
-                            )
-                        },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
-                            selectedLabelColor = MaterialTheme.colorScheme.primary,
-                        ),
-                    )
-                }
-            }
-
-            if (state.message != null) {
-                Surface(
-                    color = MaterialTheme.colorScheme.secondaryContainer,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 6.dp),
-                    shape = RoundedCornerShape(8.dp),
-                ) {
-                    Row(
-                        modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(
-                            text = state.message,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSecondaryContainer,
-                            modifier = Modifier.weight(1f),
+            when {
+                twoPane -> {
+                    Row(modifier = Modifier.weight(1f)) {
+                        ListsPane(
+                            lists = state.lists,
+                            selected = state.selectedList,
+                            loading = state.isLoadingLists,
+                            error = state.error.takeIf { state.selectedList == null },
+                            creatingPath = state.creatingListPath,
+                            onSelect = viewModel::selectList,
+                            onCreateList = { newListOpen = true },
+                            onRetry = onRefresh,
+                            showHeader = true,
+                            modifier = Modifier
+                                .widthIn(min = 260.dp, max = 340.dp)
+                                .fillMaxHeight(),
                         )
-                        IconButton(onClick = viewModel::consumeMessage, modifier = Modifier.size(30.dp)) {
-                            Icon(Icons.Default.Close, contentDescription = "Dismiss", modifier = Modifier.size(15.dp))
+                        VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
+                        if (state.selectedList == null) {
+                            EmptyState(
+                                icon = Icons.Outlined.Checklist,
+                                title = "Select a list",
+                                message = "Choose a todo list on the left.",
+                                modifier = Modifier.weight(1f),
+                            )
+                        } else {
+                            TasksPane(
+                                state = state,
+                                showHeader = true,
+                                onRefresh = onRefresh,
+                                viewModel = viewModel,
+                                onEdit = { todo ->
+                                    if (todo.startLine > 0) {
+                                        editingTodo = todo
+                                        editorOpen = true
+                                    }
+                                },
+                                modifier = Modifier.weight(1f),
+                            )
                         }
                     }
                 }
-            }
 
-            when {
-                state.isLoading && state.tasks.isEmpty() -> LoadingState("Extracting tasks…")
-                state.error != null && state.tasks.isEmpty() -> ErrorState(state.error, onRetry = viewModel::refresh)
-                state.visibleTasks.isEmpty() -> EmptyState(
-                    icon = Icons.Outlined.Checklist,
-                    title = when (state.filter) {
-                        TaskFilter.ALL -> "No tasks found"
-                        TaskFilter.OPEN -> "Nothing open"
-                        TaskFilter.COMPLETED -> "Nothing completed yet"
-                        TaskFilter.TODAY -> "Nothing due today"
-                        TaskFilter.OVERDUE -> "Nothing overdue"
-                    },
-                    message = if (state.tasks.isEmpty()) {
-                        "Tasks are parsed from Markdown checkboxes in your vault. Add one with the + button."
-                    } else {
-                        "Tasks from other filters are still in the list — switch filters above."
-                    },
-                    modifier = Modifier.fillMaxSize(),
+                state.selectedList == null -> ListsPane(
+                    lists = state.lists,
+                    selected = null,
+                    loading = state.isLoadingLists,
+                    error = state.error,
+                    creatingPath = state.creatingListPath,
+                    onSelect = viewModel::selectList,
+                    onCreateList = { newListOpen = true },
+                    onRetry = onRefresh,
+                    showHeader = false,
+                    modifier = Modifier.weight(1f),
                 )
 
-                else -> LazyColumn(modifier = Modifier.fillMaxSize()) {
-                    items(state.visibleTasks, key = { "${it.fileId}:${it.lineNumber}" }) { task ->
-                        TaskRow(
-                            task = task,
-                            pending = viewModel.isPending(task),
-                            onToggle = { completed -> viewModel.toggle(task, completed) },
-                            onOpen = { onOpenTask(task) },
-                        )
-                        Box(
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(start = 58.dp)
-                                .height(1.dp)
-                                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
-                        )
-                    }
-                    item { Spacer(Modifier.height(88.dp)) }
-                }
+                else -> TasksPane(
+                    state = state,
+                    showHeader = false,
+                    onRefresh = onRefresh,
+                    viewModel = viewModel,
+                    onEdit = { todo ->
+                        if (todo.startLine > 0) {
+                            editingTodo = todo
+                            editorOpen = true
+                        }
+                    },
+                    modifier = Modifier.weight(1f),
+                )
             }
         }
 
         FloatingActionButton(
             onClick = {
-                viewModel.loadFiles()
-                addOpen = true
+                if (state.selectedList == null) {
+                    newListOpen = true
+                } else {
+                    openAddTodo()
+                }
             },
             modifier = Modifier
                 .align(Alignment.BottomEnd)
@@ -217,147 +226,347 @@ fun TasksScreen(
             containerColor = MaterialTheme.colorScheme.primary,
             contentColor = MaterialTheme.colorScheme.onPrimary,
         ) {
-            Icon(Icons.Default.Add, contentDescription = "Add task")
+            Icon(
+                Icons.Default.Add,
+                contentDescription = if (state.selectedList == null) "New list" else "Add todo",
+            )
         }
     }
 
-    if (addOpen) {
-        AddTaskDialog(
-            files = state.files,
-            filesLoading = state.filesLoading,
-            onDismiss = { addOpen = false },
-            onAdd = { path, text, create ->
-                viewModel.addTask(path, text, create)
-                addOpen = false
+    if (newListOpen) {
+        NewListDialog(
+            onDismiss = { newListOpen = false },
+            onCreate = { name ->
+                newListOpen = false
+                viewModel.createList(name)
+            },
+        )
+    }
+
+    if (editorOpen) {
+        TodoEditorDialog(
+            todo = editingTodo,
+            onDismiss = { editorOpen = false },
+            onSave = { draft ->
+                viewModel.saveTask(editingTodo, draft)
+                editorOpen = false
+            },
+            onDelete = editingTodo?.let { todo ->
+                {
+                    viewModel.deleteTask(todo)
+                    editorOpen = false
+                }
             },
         )
     }
 }
 
 @Composable
-private fun AddTaskDialog(
-    files: List<FileSummary>,
-    filesLoading: Boolean,
-    onDismiss: () -> Unit,
-    onAdd: (path: String, text: String, create: Boolean) -> Unit,
+private fun ListsPane(
+    lists: List<TodoList>,
+    selected: TodoList?,
+    loading: Boolean,
+    error: String?,
+    creatingPath: String?,
+    onSelect: (TodoList) -> Unit,
+    onCreateList: () -> Unit,
+    onRetry: () -> Unit,
+    showHeader: Boolean,
+    modifier: Modifier = Modifier,
 ) {
-    var taskText by remember { mutableStateOf("") }
-    var fileFilter by remember { mutableStateOf("") }
-    var selectedPath by remember { mutableStateOf<String?>(null) }
-    var createNew by remember { mutableStateOf(false) }
-    var newPath by remember { mutableStateOf("") }
-    val taskFocus = remember { FocusRequester() }
-    val filtered = remember(files, fileFilter) {
-        if (fileFilter.isBlank()) files else files.filter {
-            it.relativePath.contains(fileFilter, ignoreCase = true)
+    Column(modifier = modifier) {
+        if (showHeader) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 8.dp, top = 4.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "Lists",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = onCreateList) {
+                    Icon(Icons.Default.Add, contentDescription = "New list")
+                }
+            }
+        }
+        when {
+            loading && lists.isEmpty() -> LoadingState("Loading lists…")
+            error != null && lists.isEmpty() -> ErrorState(error, onRetry = onRetry)
+            lists.isEmpty() -> EmptyState(
+                icon = Icons.Outlined.Checklist,
+                title = "No todo lists",
+                message = "Create TODO.md, job.TODO.md, or add a list here.",
+                actionLabel = "Create list",
+                onAction = onCreateList,
+                modifier = Modifier.fillMaxSize(),
+            )
+
+            else -> LazyColumn(modifier = Modifier.fillMaxSize()) {
+                items(lists, key = { it.relativePath }) { list ->
+                    TodoListCard(
+                        list = list,
+                        selected = selected?.relativePath == list.relativePath,
+                        creating = creatingPath == list.relativePath,
+                        onClick = { onSelect(list) },
+                    )
+                }
+                item { Spacer(Modifier.height(88.dp)) }
+            }
         }
     }
-    val target = if (createNew) newPath.trim() else selectedPath.orEmpty()
+}
 
-    LaunchedEffect(Unit) {
-        delay(120)
-        taskFocus.requestFocus()
-    }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Add task") },
-        text = {
-            Column {
-                OutlinedTextField(
-                    value = taskText,
-                    onValueChange = { taskText = it },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .focusRequester(taskFocus),
-                    label = { Text("Task") },
-                    placeholder = { Text("What needs doing?") },
-                    singleLine = false,
-                    maxLines = 3,
-                )
-                Spacer(Modifier.height(12.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(checked = createNew, onCheckedChange = { createNew = it })
-                    Text("Create a new note", style = MaterialTheme.typography.bodyMedium)
-                }
-                if (createNew) {
-                    OutlinedTextField(
-                        value = newPath,
-                        onValueChange = { newPath = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("New note path") },
-                        placeholder = { Text("Inbox.md or Projects/Plan.md") },
-                        singleLine = true,
-                    )
-                } else {
-                    OutlinedTextField(
-                        value = fileFilter,
-                        onValueChange = { fileFilter = it },
-                        modifier = Modifier.fillMaxWidth(),
-                        label = { Text("Find note") },
-                        singleLine = true,
-                        leadingIcon = {
-                            Icon(Icons.Outlined.Search, contentDescription = null, modifier = Modifier.size(18.dp))
+@Composable
+private fun TodoListCard(
+    list: TodoList,
+    selected: Boolean,
+    creating: Boolean,
+    onClick: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        color = if (selected) {
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerLow
+        },
+        shape = RoundedCornerShape(14.dp),
+        onClick = { if (!creating) onClick() },
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(
+                        if (selected) {
+                            MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+                        } else {
+                            MaterialTheme.colorScheme.surfaceContainerHigh
                         },
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    if (filesLoading) {
-                        LoadingState("Loading notes…")
-                    } else {
-                        LazyColumn(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .heightIn(max = 190.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(MaterialTheme.colorScheme.surfaceContainerLow),
-                        ) {
-                            items(filtered.take(200), key = { it.relativePath }) { file ->
-                                val selected = file.relativePath == selectedPath
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable { selectedPath = file.relativePath }
-                                        .background(
-                                            if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
-                                            else MaterialTheme.colorScheme.surfaceContainerLow,
-                                        )
-                                        .padding(horizontal = 10.dp, vertical = 9.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Icon(
-                                        Icons.Outlined.Checklist,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(15.dp),
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                    Spacer(Modifier.width(8.dp))
-                                    Column {
-                                        Text(
-                                            text = file.filename,
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                        Text(
-                                            text = file.relativePath,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                    }
-                                }
-                            }
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Checklist,
+                    contentDescription = null,
+                    tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(21.dp),
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = list.name,
+                    style = MaterialTheme.typography.titleSmall,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    text = list.relativePath,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(3.dp))
+                if (creating) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(13.dp),
+                            strokeWidth = 2.dp,
+                        )
+                        Text(
+                            text = "Creating…",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                } else {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = if (list.openCount == 0) "No open todos" else "${list.openCount} open",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        if (list.overdueCount > 0) {
+                            Text(
+                                text = "${list.overdueCount} overdue",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.error,
+                            )
                         }
                     }
                 }
             }
+            if (selected) {
+                Icon(
+                    imageVector = Icons.Default.Check,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun TasksPane(
+    state: TasksUiState,
+    showHeader: Boolean,
+    onRefresh: () -> Unit,
+    viewModel: TasksViewModel,
+    onEdit: (TodoItem) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val list = state.selectedList ?: return
+    val visible = state.visibleTasks()
+
+    Column(modifier = modifier) {
+        if (showHeader) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = list.name,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        text = list.relativePath,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Text(
+                    text = "${state.openCount} open",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            FilterChip(
+                selected = state.hideFuture,
+                onClick = { viewModel.setHideFuture(!state.hideFuture) },
+                label = { Text("Hide future", style = MaterialTheme.typography.labelMedium) },
+                leadingIcon = {
+                    Icon(
+                        Icons.Outlined.FilterList,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                    )
+                },
+                colors = FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
+                    selectedLabelColor = MaterialTheme.colorScheme.primary,
+                    selectedLeadingIconColor = MaterialTheme.colorScheme.primary,
+                ),
+            )
+            Spacer(Modifier.weight(1f))
+            if (state.overdueCount > 0) {
+                Text(
+                    text = "${state.overdueCount} overdue",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        }
+
+        when {
+            state.isLoadingTasks && state.tasks.isEmpty() -> LoadingState("Loading todos…")
+            state.error != null && state.tasks.isEmpty() -> ErrorState(state.error, onRetry = onRefresh)
+            visible.isEmpty() -> EmptyState(
+                icon = Icons.Outlined.Checklist,
+                title = if (state.hideFuture) "Nothing due right now" else "No todos yet",
+                message = if (state.hideFuture) {
+                    "Future todos are hidden."
+                } else {
+                    "Add your first todo with the + button."
+                },
+                modifier = Modifier.fillMaxSize(),
+            )
+
+            else -> LazyColumn(modifier = Modifier.fillMaxSize()) {
+                items(
+                    visible,
+                    key = { it.startLine },
+                    contentType = { "todo" },
+                ) { todo ->
+                    TodoRow(
+                        todo = todo,
+                        pending = viewModel.isPending(todo),
+                        onToggle = { completed -> viewModel.toggle(todo, completed) },
+                        onClick = { onEdit(todo) },
+                    )
+                    HorizontalDivider(
+                        modifier = Modifier.padding(start = 56.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                    )
+                }
+                item { Spacer(Modifier.height(88.dp)) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NewListDialog(
+    onDismiss: () -> Unit,
+    onCreate: (String) -> Unit,
+) {
+    var name by remember { mutableStateOf("") }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("New todo list") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("List name") },
+                    placeholder = { Text("job") },
+                    singleLine = true,
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = "Creates job.TODO.md. Use main for TODO.md.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         },
         confirmButton = {
             Button(
-                enabled = taskText.isNotBlank() && target.isNotBlank(),
-                onClick = { onAdd(target, taskText, createNew) },
-            ) { Text("Add") }
+                onClick = { onCreate(name) },
+                enabled = name.isNotBlank(),
+            ) { Text("Create") }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("Cancel") }

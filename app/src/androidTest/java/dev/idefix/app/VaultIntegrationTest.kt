@@ -9,14 +9,15 @@ import dev.idefix.app.data.database.IdefixDatabase
 import dev.idefix.app.data.index.DefaultIndexRepository
 import dev.idefix.app.data.recents.DefaultRecentFilesRepository
 import dev.idefix.app.data.search.DefaultSearchRepository
-import dev.idefix.app.data.tasks.DefaultTaskRepository
+import dev.idefix.app.data.tasks.DefaultTodoRepository
 import dev.idefix.app.data.vault.SafVaultRepository
 import dev.idefix.app.domain.model.AppSettings
 import dev.idefix.app.domain.model.SearchMode
-import dev.idefix.app.domain.model.TaskUpdateResult
+import dev.idefix.app.domain.model.TodoDraft
+import dev.idefix.app.domain.model.TodoUpdateResult
 import dev.idefix.app.domain.repository.IndexRepository
 import dev.idefix.app.domain.repository.SearchRepository
-import dev.idefix.app.domain.repository.TaskRepository
+import dev.idefix.app.domain.repository.TodoRepository
 import dev.idefix.app.domain.repository.VaultRepository
 import dev.idefix.app.testing.TestDocumentsProvider
 import kotlinx.coroutines.flow.first
@@ -42,7 +43,7 @@ class VaultIntegrationTest {
     private lateinit var vault: VaultRepository
     private lateinit var index: IndexRepository
     private lateinit var search: SearchRepository
-    private lateinit var tasks: TaskRepository
+    private lateinit var todos: TodoRepository
     private lateinit var recents: DefaultRecentFilesRepository
 
     private val projectPath = "Notes/Project Plan.md"
@@ -61,7 +62,7 @@ class VaultIntegrationTest {
         vault.adoptVault(treeUri.toString(), "Test vault")
         index = DefaultIndexRepository(db, vault)
         search = DefaultSearchRepository(db.fileDao(), db.ftsDao())
-        tasks = DefaultTaskRepository(db.ftsDao(), vault, index)
+        todos = DefaultTodoRepository(search, db.ftsDao(), vault, index)
         recents = DefaultRecentFilesRepository(db.recentDao())
     }
 
@@ -85,8 +86,26 @@ class VaultIntegrationTest {
         File(vaultDir, "Windows.md").writeText("line one\r\n- [ ] windows task\r\nline three\r\n")
         File(vaultDir, "Unicode.md").writeText("# Überblick\n\nDie Straße ist schön.\n")
         File(vaultDir, ".hidden/Secret.md").writeText("hidden walrus")
-        File(vaultDir, "Tasks.md").writeText(
-            "# Tasks\n- [ ] Open task\n- [x] Done task\n- [X] Also done\n  - [ ] Nested child\n- [ ] Prepare plan 📅 2026-10-30\n",
+        File(vaultDir, "TODO.md").writeText(
+            """
+            # TODO
+
+            - [ ] Open task
+              due: 2026-10-30 18:00
+              Remember the milk.
+
+            - [x] Done task
+
+            - [ ] Prepare plan
+              due: 2026-10-31 09:30
+
+            ```
+            - [ ] fake task in code
+            ```
+            """.trimIndent() + "\n",
+        )
+        File(vaultDir, "job.TODO.md").writeText(
+            "# Job\n\n- [ ] Write report\n  Body for the report.\n",
         )
         File(vaultDir, "Code.md").writeText("```\n- [ ] fake task in code\n```\n")
         File(vaultDir, "Large.md").writeText(buildString {
@@ -178,47 +197,87 @@ class VaultIntegrationTest {
     }
 
     @Test
-    fun tasksAreExtractedAndToggledInSource() = runBlocking {
+    fun todoListsAreDiscoveredAndParsed() = runBlocking {
         index.rebuild(false)
-        val all = tasks.loadTasks()
-        val open = all.first { it.text == "Open task" && it.relativePath == "Tasks.md" }
-        val done = all.first { it.text == "Done task" }
-        val nested = all.first { it.text == "Nested child" }
-        val due = all.first { it.text == "Prepare plan" }
-        assertFalse(open.completed)
-        assertTrue(done.completed)
-        assertEquals(1, nested.depth)
-        assertEquals(java.time.LocalDate.of(2026, 10, 30), due.dueDate)
-        assertFalse(all.any { it.text.contains("fake task in code") })
+        val lists = todos.loadLists()
+        assertEquals(listOf("TODO.md", "job.TODO.md"), lists.map { it.relativePath })
+        assertEquals("Main", lists.first().name)
+        assertEquals("Job", lists.last().name)
 
-        val toggle = tasks.setCompleted(open, true)
-        assertTrue(toggle is TaskUpdateResult.Success)
-        val taskFile = File(vaultDir, "Tasks.md").readText()
-        assertTrue(taskFile.contains("- [x] Open task"))
-        assertTrue(taskFile.contains("- [ ] Prepare plan 📅 2026-10-30"))
-        assertTrue(taskFile.contains("  - [ ] Nested child"))
+        val main = lists.first()
+        val items = todos.loadTasks(main)
+        assertEquals(listOf("Open task", "Done task", "Prepare plan"), items.map { it.title })
+        assertFalse(items.first().completed)
+        assertTrue(items[1].completed)
+        assertEquals("Remember the milk.", items.first().body)
+        assertEquals(
+            java.time.LocalDateTime.of(2026, 10, 30, 18, 0),
+            items.first().due,
+        )
+        assertFalse(items.any { it.title.contains("fake task in code") })
 
-        val reopen = tasks.setCompleted(done.copy(completed = true), false)
-        assertTrue(reopen is TaskUpdateResult.Success)
-        assertTrue(File(vaultDir, "Tasks.md").readText().contains("- [ ] Done task"))
-
-        val add = tasks.addTask("Notes/Alpha.md", "New task #work")
-        assertTrue(add is TaskUpdateResult.Success)
-        assertEquals("# Alpha\n\nA quiet note.\n- [ ] New task #work\n", File(vaultDir, "Notes/Alpha.md").readText())
-
-        val added = tasks.loadTasks().first { it.text == "New task #work" }
-        assertEquals(listOf("work"), added.tags)
+        val job = lists.last()
+        assertEquals("Body for the report.", todos.loadTasks(job).first().body)
     }
 
     @Test
-    fun taskConflictWhenLineChangesExternally() = runBlocking {
+    fun todoMutationsRoundTrip() = runBlocking {
         index.rebuild(false)
-        val task = tasks.loadTasks().first { it.text == "Prepare plan" }
-        val taskFile = File(vaultDir, "Tasks.md")
+        val main = todos.loadLists().first { it.relativePath == "TODO.md" }
+        val open = todos.loadTasks(main).first { it.title == "Open task" }
+
+        assertTrue(todos.setCompleted(main, open, true) is TodoUpdateResult.Success)
+        val toggled = File(vaultDir, "TODO.md").readText()
+        assertTrue(toggled.contains("- [x] Open task"))
+        assertTrue(toggled.contains("  due: 2026-10-30 18:00"))
+        assertTrue(toggled.contains("  Remember the milk."))
+
+        val refreshed = todos.loadTasks(main).first { it.title == "Open task" }
+        val update = todos.updateTask(
+            main,
+            refreshed,
+            TodoDraft(
+                title = "Buy oat milk",
+                body = "Check the fridge.",
+                due = java.time.LocalDateTime.of(2026, 11, 1, 10, 30),
+            ),
+        )
+        assertTrue(update is TodoUpdateResult.Success)
+        assertTrue(
+            File(vaultDir, "TODO.md").readText()
+                .contains("- [x] Buy oat milk\n  due: 2026-11-01 10:30\n  Check the fridge."),
+        )
+
+        assertTrue(
+            todos.addTask(
+                main,
+                TodoDraft("New todo", "New body", java.time.LocalDateTime.of(2026, 12, 24, 20, 0)),
+            ) is TodoUpdateResult.Success,
+        )
+        val added = todos.loadTasks(main).first { it.title == "New todo" }
+        assertEquals("New body", added.body)
+        assertTrue(todos.deleteTask(main, added) is TodoUpdateResult.Success)
+        assertFalse(todos.loadTasks(main).any { it.title == "New todo" })
+    }
+
+    @Test
+    fun todoConflictWhenTheBlockChangesExternally() = runBlocking {
+        index.rebuild(false)
+        val main = todos.loadLists().first { it.relativePath == "TODO.md" }
+        val task = todos.loadTasks(main).first { it.title == "Prepare plan" }
+        val taskFile = File(vaultDir, "TODO.md")
         taskFile.writeText(taskFile.readText().replace("Prepare plan", "Renamed externally"))
-        val result = tasks.setCompleted(task, true)
-        assertTrue(result is TaskUpdateResult.Conflict)
+        val result = todos.setCompleted(main, task, true)
+        assertTrue(result is TodoUpdateResult.Conflict)
         assertTrue(taskFile.readText().contains("- [ ] Renamed externally"))
+    }
+
+    @Test
+    fun creatingAListAddsTheTodoSuffix() = runBlocking {
+        index.rebuild(false)
+        assertTrue(todos.createList("personal") is TodoUpdateResult.Success)
+        assertTrue(File(vaultDir, "personal.TODO.md").exists())
+        assertTrue(todos.loadLists().any { it.relativePath == "personal.TODO.md" })
     }
 
     @Test

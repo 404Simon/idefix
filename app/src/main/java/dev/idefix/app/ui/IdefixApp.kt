@@ -69,7 +69,6 @@ import dev.idefix.app.domain.model.DocumentMode
 import dev.idefix.app.domain.model.IndexState
 import dev.idefix.app.domain.model.RecentFile
 import dev.idefix.app.domain.model.SearchResult
-import dev.idefix.app.domain.model.TaskItem
 import dev.idefix.app.domain.model.VaultFile
 import dev.idefix.app.navigation.AppSection
 import dev.idefix.app.ui.components.EmptyState
@@ -119,7 +118,7 @@ fun IdefixApp(
     )
     val tasksViewModel: TasksViewModel = viewModel(
         factory = idefixViewModelFactory {
-            TasksViewModel(container.taskRepository, container.searchRepository)
+            TasksViewModel(container.todoRepository)
         },
     )
     val recentViewModel: RecentViewModel = viewModel(
@@ -163,6 +162,9 @@ fun IdefixApp(
     )
 
     val documentVisible = documentState.hasDocument || documentState.isLoading || documentState.error != null
+    // The task tab owns the whole window, so an open note must not hide its
+    // navigation or intercept the system back gesture there.
+    val documentPaneActive = documentVisible && section != AppSection.TASKS
 
     LaunchedEffect(appState.indexState) {
         if (appState.indexState is IndexState.Ready) {
@@ -195,6 +197,12 @@ fun IdefixApp(
         recentMessages.message?.let {
             snackbarHostState.showSnackbar(it)
             recentViewModel.consumeMessage()
+        }
+    }
+    LaunchedEffect(tasksState.message) {
+        tasksState.message?.let {
+            snackbarHostState.showSnackbar(it)
+            tasksViewModel.consumeMessage()
         }
     }
     LaunchedEffect(Unit) {
@@ -298,18 +306,6 @@ fun IdefixApp(
         )
     }
 
-    fun openTask(task: TaskItem) {
-        requestOpen(
-            OpenDocumentRequest(
-                fileId = task.fileId,
-                uri = task.uri,
-                relativePath = task.relativePath,
-                filename = task.filename,
-                line = task.lineNumber,
-            ),
-        )
-    }
-
     fun openSearchResult(result: SearchResult) {
         requestOpen(
             OpenDocumentRequest(
@@ -382,7 +378,7 @@ fun IdefixApp(
 
                     else -> false
                 }
-            } else if (event.key == Key.Escape && documentVisible) {
+            } else if (event.key == Key.Escape && documentPaneActive) {
                 if (documentState.findVisible) {
                     documentViewModel.hideFind()
                 } else {
@@ -414,7 +410,7 @@ fun IdefixApp(
                 Scaffold(
                     snackbarHost = { SnackbarHost(snackbarHostState) },
                     bottomBar = {
-                        if (!useRail && !documentVisible) {
+                        if (!useRail && !documentPaneActive) {
                             BottomNavigation(section) { selected ->
                                 section = selected
                             }
@@ -463,6 +459,13 @@ fun IdefixApp(
                                     onRecentLimit = appViewModel::setRecentLimit,
                                     onMessage = appViewModel::showMessage,
                                 )
+                            } else if (section == AppSection.TASKS) {
+                                TasksScreen(
+                                    state = tasksState,
+                                    twoPane = twoPane,
+                                    onRefresh = tasksViewModel::refresh,
+                                    viewModel = tasksViewModel,
+                                )
                             } else {
                                 ListDetailPaneScaffold(
                                     directive = navigator.scaffoldDirective,
@@ -484,12 +487,7 @@ fun IdefixApp(
                                                     viewModel = searchViewModel,
                                                 )
 
-                                                AppSection.TASKS -> TasksScreen(
-                                                    state = tasksState,
-                                                    onOpenTask = ::openTask,
-                                                    onRefresh = tasksViewModel::refresh,
-                                                    viewModel = tasksViewModel,
-                                                )
+                                                AppSection.TASKS -> Unit
 
                                                 AppSection.RECENT -> RecentScreen(
                                                     files = recentFiles,
@@ -541,7 +539,7 @@ fun IdefixApp(
             }
         }
 
-        BackHandler(enabled = documentVisible && !discardDialogOpen) {
+        BackHandler(enabled = documentPaneActive && !discardDialogOpen) {
             if (documentState.findVisible) {
                 documentViewModel.hideFind()
             } else {

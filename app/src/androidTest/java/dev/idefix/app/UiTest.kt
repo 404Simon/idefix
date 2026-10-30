@@ -21,10 +21,10 @@ import dev.idefix.app.domain.model.AppSettings
 import dev.idefix.app.domain.model.IndexState
 import dev.idefix.app.domain.model.SearchMode
 import dev.idefix.app.domain.model.SearchResult
-import dev.idefix.app.domain.model.TaskItem
 import dev.idefix.app.domain.model.ThemeMode
+import dev.idefix.app.domain.model.TodoItem
 import dev.idefix.app.ui.components.EmptyState
-import dev.idefix.app.ui.components.TaskRow
+import dev.idefix.app.ui.components.TodoRow
 import dev.idefix.app.ui.search.SearchScreen
 import dev.idefix.app.ui.search.SearchViewModel
 import dev.idefix.app.ui.theme.IdefixTheme
@@ -75,51 +75,55 @@ class UiTest {
     }
 
     @Test
-    fun taskCheckboxUpdatesSourceSemantics() {
+    fun todoCheckboxTogglesAndRowOpensEditor() {
         var completedValue: Boolean? = null
         var opened = false
-        val task = TaskItem(
+        val todo = TodoItem(
             fileId = 1,
             uri = "content://test/1",
-            relativePath = "Notes/Tasks.md",
-            filename = "Tasks.md",
-            lineNumber = 3,
-            text = "Buy milk",
+            relativePath = "TODO.md",
+            filename = "TODO.md",
+            startLine = 3,
+            endLine = 4,
+            title = "Buy milk",
+            body = "Oat milk, not soy.",
             completed = false,
-            dueDate = LocalDate.now().plusDays(1),
-            tags = listOf("errand"),
+            due = LocalDate.now().plusDays(1).atTime(18, 0),
         )
         composeRule.setContent {
             IdefixTheme(ThemeMode.DARK, dynamicColor = false) {
-                TaskRow(
-                    task = task,
+                TodoRow(
+                    todo = todo,
                     pending = false,
                     onToggle = { completedValue = it },
-                    onOpen = { opened = true },
+                    onClick = { opened = true },
                 )
             }
         }
-        composeRule.onNodeWithContentDescription("Task: Buy milk").assertIsOff().performClick()
+        composeRule.onNodeWithContentDescription("Todo: Buy milk").assertIsOff().performClick()
         assertEquals(true, completedValue)
         composeRule.onNodeWithText("Buy milk").performClick()
         assertTrue(opened)
     }
 
     @Test
-    fun completedTaskIsRenderedChecked() {
-        val task = TaskItem(
+    fun completedTodoIsRenderedChecked() {
+        val todo = TodoItem(
             fileId = 1,
             uri = "content://test/1",
-            relativePath = "a.md",
-            filename = "a.md",
-            lineNumber = 1,
-            text = "Finished",
+            relativePath = "TODO.md",
+            filename = "TODO.md",
+            startLine = 1,
+            endLine = 1,
+            title = "Finished",
+            body = "",
             completed = true,
+            due = null,
         )
         composeRule.setContent {
-            IdefixTheme { TaskRow(task = task, pending = false, onToggle = {}, onOpen = {}) }
+            IdefixTheme { TodoRow(todo = todo, pending = false, onToggle = {}, onClick = {}) }
         }
-        composeRule.onNodeWithContentDescription("Task: Finished").assertIsOn()
+        composeRule.onNodeWithContentDescription("Todo: Finished").assertIsOn()
     }
 
     @Test
