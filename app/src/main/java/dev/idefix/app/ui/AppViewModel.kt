@@ -7,6 +7,7 @@ import dev.idefix.app.BuildConfig
 import dev.idefix.app.domain.model.AppSettings
 import dev.idefix.app.domain.model.IndexState
 import dev.idefix.app.domain.model.IndexSummary
+import dev.idefix.app.domain.model.LectureInfo
 import dev.idefix.app.domain.model.SearchMode
 import dev.idefix.app.domain.model.ThemeMode
 import dev.idefix.app.domain.model.VaultInfo
@@ -22,6 +23,7 @@ enum class StartupPhase { LOADING, WELCOME, READY }
 data class AppUiState(
     val settings: AppSettings = AppSettings(),
     val vault: VaultInfo? = null,
+    val lecture: LectureInfo? = null,
     val phase: StartupPhase = StartupPhase.LOADING,
     val startupError: String? = null,
     val indexState: IndexState = IndexState.Idle,
@@ -62,10 +64,16 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
                 _uiState.update { it.copy(isSyncing = count > 0) }
             }
         }
+        viewModelScope.launch {
+            container.lectureRepository.lectureInfo.collect { info ->
+                _uiState.update { it.copy(lecture = info) }
+            }
+        }
     }
 
     private fun initializeVault(settings: AppSettings) {
         viewModelScope.launch {
+            restoreLecture(settings.lectureUri, settings.lectureName)
             val uri = settings.vaultUri
             if (uri == null) {
                 _uiState.update { it.copy(phase = StartupPhase.WELCOME, vault = null) }
@@ -190,6 +198,37 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
             container.recentFilesRepository.clearHistory()
             _uiState.update { it.copy(message = "Recent history cleared") }
         }
+    }
+
+    fun onLectureSelected(uri: String) {
+        viewModelScope.launch {
+            try {
+                val info = container.lectureRepository.adoptLecture(uri, null)
+                _uiState.update {
+                    it.copy(lecture = info, message = "Lectures folder set to ${info.displayName}")
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(message = e.message ?: "The lectures folder could not be opened")
+                }
+            }
+        }
+    }
+
+    fun clearLecture() {
+        viewModelScope.launch {
+            container.lectureRepository.clearLecture()
+            _uiState.update { it.copy(lecture = null, message = "Lectures folder removed") }
+        }
+    }
+
+    private suspend fun restoreLecture(uri: String?, displayName: String?) {
+        if (uri.isNullOrBlank()) {
+            _uiState.update { it.copy(lecture = null) }
+            return
+        }
+        val info = container.lectureRepository.restoreLecture(uri, displayName)
+        _uiState.update { it.copy(lecture = info) }
     }
 
     fun switchVault() {

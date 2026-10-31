@@ -1,5 +1,8 @@
 package dev.idefix.app.ui
 
+import android.content.ActivityNotFoundException
+import android.content.ClipData
+import android.content.Intent
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -16,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Article
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.outlined.School
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -56,6 +60,7 @@ import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -64,6 +69,8 @@ import androidx.window.core.layout.WindowSizeClass
 import dev.idefix.app.AppContainer
 import dev.idefix.app.domain.model.DocumentMode
 import dev.idefix.app.domain.model.IndexState
+import dev.idefix.app.domain.model.LectureEntry
+import dev.idefix.app.domain.model.LectureEntryKind
 import dev.idefix.app.domain.model.RecentFile
 import dev.idefix.app.domain.model.SearchResult
 import dev.idefix.app.domain.model.VaultFile
@@ -72,6 +79,8 @@ import dev.idefix.app.ui.components.EmptyState
 import dev.idefix.app.ui.editor.DocumentScreen
 import dev.idefix.app.ui.editor.DocumentViewModel
 import dev.idefix.app.ui.editor.OpenDocumentRequest
+import dev.idefix.app.ui.lectures.LecturesScreen
+import dev.idefix.app.ui.lectures.LecturesViewModel
 import dev.idefix.app.ui.search.SearchScreen
 import dev.idefix.app.ui.search.SearchViewModel
 import dev.idefix.app.ui.settings.SettingsScreen
@@ -91,6 +100,7 @@ fun IdefixApp(
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
     val rootFocus = remember { FocusRequester() }
+    val context = LocalContext.current
 
     val searchViewModel: SearchViewModel = viewModel(
         factory = idefixViewModelFactory {
@@ -116,9 +126,15 @@ fun IdefixApp(
             TasksViewModel(container.todoRepository, container.syncCoordinator)
         },
     )
+    val lecturesViewModel: LecturesViewModel = viewModel(
+        factory = idefixViewModelFactory {
+            LecturesViewModel(container.lectureRepository)
+        },
+    )
     val searchState by searchViewModel.state.collectAsStateWithLifecycle()
     val documentState by documentViewModel.state.collectAsStateWithLifecycle()
     val tasksState by tasksViewModel.state.collectAsStateWithLifecycle()
+    val lecturesState by lecturesViewModel.state.collectAsStateWithLifecycle()
 
     var section by rememberSaveable { mutableStateOf(AppSection.TASKS) }
     var showFileBrowser by rememberSaveable { mutableStateOf(false) }
@@ -132,6 +148,12 @@ fun IdefixApp(
             appViewModel.onVaultSelected(uri.toString())
         } else {
             appViewModel.vaultSelectionCancelled()
+        }
+    }
+
+    val lecturePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        if (uri != null) {
+            appViewModel.onLectureSelected(uri.toString())
         }
     }
 
@@ -149,9 +171,9 @@ fun IdefixApp(
     )
 
     val documentVisible = documentState.hasDocument || documentState.isLoading || documentState.error != null
-    // The task tab owns the whole window, so an open note must not hide its
-    // navigation or intercept the system back gesture there.
-    val documentPaneActive = documentVisible && section != AppSection.TASKS
+    // The task and lectures tabs own the whole window, so an open note must not
+    // hide their navigation or intercept the system back gesture there.
+    val documentPaneActive = documentVisible && section != AppSection.TASKS && section != AppSection.LECTURES
 
     LaunchedEffect(appState.indexState) {
         if (appState.indexState is IndexState.Ready) {
@@ -163,6 +185,7 @@ fun IdefixApp(
         when (section) {
             AppSection.TASKS -> tasksViewModel.refresh()
             AppSection.NOTES -> searchViewModel.refreshSummary()
+            AppSection.LECTURES -> lecturesViewModel.refresh()
             else -> Unit
         }
     }
@@ -299,6 +322,26 @@ fun IdefixApp(
         )
     }
 
+    fun openLectureExternally(entry: LectureEntry) {
+        val mime = if (entry.kind != LectureEntryKind.OTHER) {
+            entry.kind.defaultMimeType
+        } else {
+            entry.mimeType?.takeIf { it.isNotBlank() } ?: "*/*"
+        }
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(entry.uriObject, mime)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            clipData = ClipData.newRawUri(entry.name, entry.uriObject)
+        }
+        try {
+            context.startActivity(intent)
+        } catch (e: ActivityNotFoundException) {
+            appViewModel.showMessage("No app can open ${entry.name}")
+        } catch (e: Exception) {
+            appViewModel.showMessage(e.message ?: "Could not open ${entry.name}")
+        }
+    }
+
     fun createNote(name: String) {
         showCreateNote = false
         scope.launch {
@@ -431,6 +474,8 @@ fun IdefixApp(
                                     appState = appState,
                                     onSwitchVault = { vaultPicker.launch(null) },
                                     onBrowseFiles = { showFileBrowser = true },
+                                    onChooseLecturesFolder = { lecturePicker.launch(null) },
+                                    onClearLecturesFolder = appViewModel::clearLecture,
                                     onRebuild = appViewModel::rebuildIndex,
                                     onCancel = appViewModel::cancelIndexing,
                                     onTheme = appViewModel::setTheme,
@@ -453,6 +498,15 @@ fun IdefixApp(
                                     },
                                     onCancelSync = appViewModel::cancelIndexing,
                                     viewModel = tasksViewModel,
+                                )
+                            } else if (section == AppSection.LECTURES) {
+                                LecturesScreen(
+                                    state = lecturesState,
+                                    configured = appState.settings.hasLecture,
+                                    twoPane = twoPane,
+                                    onChooseFolder = { lecturePicker.launch(null) },
+                                    onOpenExternal = ::openLectureExternally,
+                                    viewModel = lecturesViewModel,
                                 )
                             } else {
                                 ListDetailPaneScaffold(
@@ -477,6 +531,8 @@ fun IdefixApp(
                                                 )
 
                                                 AppSection.TASKS -> Unit
+
+                                                AppSection.LECTURES -> Unit
 
                                                 AppSection.SETTINGS -> Unit
                                             }
@@ -623,5 +679,6 @@ private fun BottomNavigation(current: AppSection, onSelect: (AppSection) -> Unit
 private fun sectionIcon(section: AppSection) = when (section) {
     AppSection.TASKS -> Icons.Default.CheckCircle
     AppSection.NOTES -> Icons.AutoMirrored.Outlined.Article
+    AppSection.LECTURES -> Icons.Outlined.School
     AppSection.SETTINGS -> Icons.Default.Settings
 }

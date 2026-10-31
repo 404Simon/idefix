@@ -10,6 +10,8 @@ interface SettingsRepository {
 
     suspend fun setVault(uri: String, displayName: String)
     suspend fun clearVault()
+    suspend fun setLecture(uri: String, displayName: String)
+    suspend fun clearLecture()
     suspend fun setTheme(mode: ThemeMode)
     suspend fun setIncludeHidden(enabled: Boolean)
     suspend fun setCaseSensitive(enabled: Boolean)

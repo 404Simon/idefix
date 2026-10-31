@@ -37,6 +37,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -47,6 +48,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.idefix.app.domain.model.IndexState
+import dev.idefix.app.domain.model.LectureInfo
 import dev.idefix.app.domain.model.ThemeMode
 import dev.idefix.app.domain.model.VaultInfo
 import dev.idefix.app.ui.AppUiState
@@ -59,6 +61,8 @@ fun SettingsScreen(
     appState: AppUiState,
     onSwitchVault: () -> Unit,
     onBrowseFiles: () -> Unit,
+    onChooseLecturesFolder: () -> Unit,
+    onClearLecturesFolder: () -> Unit,
     onRebuild: () -> Unit,
     onCancel: () -> Unit,
     onTheme: (ThemeMode) -> Unit,
@@ -106,6 +110,18 @@ fun SettingsScreen(
                         vault = appState.vault,
                         onSwitchVault = onSwitchVault,
                         onBrowseFiles = onBrowseFiles,
+                    )
+                }
+            }
+
+            item { SectionLabel("Lectures", Modifier.padding(top = 4.dp)) }
+            item {
+                SettingsCard {
+                    LectureRow(
+                        lecture = appState.lecture,
+                        configured = settings.hasLecture,
+                        onChooseFolder = onChooseLecturesFolder,
+                        onClearFolder = onClearLecturesFolder,
                     )
                 }
             }
@@ -230,6 +246,8 @@ fun SettingsScreen(
                         appState.indexSummary.lastIndexedAt?.let(::relativeTime) ?: "never",
                     )
                     DiagnosticRow("Vault URI", appState.vault?.uri ?: "none", maxLines = 2)
+                    DiagnosticRow("Lectures", appState.lecture?.displayName ?: "none")
+                    DiagnosticRow("Lectures URI", appState.lecture?.uri ?: "none", maxLines = 2)
                     Spacer(Modifier.height(8.dp))
                     OutlinedButton(
                         onClick = {
@@ -238,6 +256,8 @@ fun SettingsScreen(
                                 appendLine("Android ${Build.VERSION.RELEASE} API ${Build.VERSION.SDK_INT}")
                                 appendLine("Vault: ${appState.vault?.displayName ?: "none"}")
                                 appendLine("Vault URI: ${appState.vault?.uri ?: "none"}")
+                                appendLine("Lectures: ${appState.lecture?.displayName ?: "none"}")
+                                appendLine("Lectures URI: ${appState.lecture?.uri ?: "none"}")
                                 appendLine("Indexed: ${appState.indexSummary.fileCount}")
                                 appendLine("Failures: ${appState.indexSummary.failedCount}")
                                 appendLine("Theme: ${settings.themeMode}")
@@ -321,6 +341,46 @@ private fun VaultRow(
         }
         Button(onClick = onSwitchVault) {
             Text("Switch vault")
+        }
+    }
+}
+
+@Composable
+private fun LectureRow(
+    lecture: LectureInfo?,
+    configured: Boolean,
+    onChooseFolder: () -> Unit,
+    onClearFolder: () -> Unit,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = lecture?.displayName ?: if (configured) "Lectures folder unavailable" else "No lectures folder",
+                style = MaterialTheme.typography.titleSmall,
+            )
+            Text(
+                text = lecture?.uri ?: if (configured) {
+                    "The permission is no longer available. Choose the folder again."
+                } else {
+                    "A separate folder for lecture PDFs and code, for example ~/Vorlesungen. Its subfolders become lectures."
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+    Spacer(Modifier.height(10.dp))
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        OutlinedButton(onClick = onChooseFolder) {
+            Icon(Icons.Outlined.FolderOpen, contentDescription = null, modifier = Modifier.height(16.dp))
+            Text(if (configured) "  Change folder" else "  Choose folder")
+        }
+        if (configured) {
+            TextButton(onClick = onClearFolder) {
+                Text("Remove")
+            }
         }
     }
 }

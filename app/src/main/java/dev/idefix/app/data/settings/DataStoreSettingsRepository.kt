@@ -27,6 +27,8 @@ class DataStoreSettingsRepository(context: Context) : SettingsRepository {
     private object Keys {
         val vaultUri = stringPreferencesKey("vault_uri")
         val vaultName = stringPreferencesKey("vault_name")
+        val lectureUri = stringPreferencesKey("lecture_uri")
+        val lectureName = stringPreferencesKey("lecture_name")
         val theme = stringPreferencesKey("theme")
         val includeHidden = booleanPreferencesKey("include_hidden")
         val caseSensitive = booleanPreferencesKey("case_sensitive")
@@ -43,6 +45,8 @@ class DataStoreSettingsRepository(context: Context) : SettingsRepository {
             AppSettings(
                 vaultUri = prefs[Keys.vaultUri],
                 vaultName = prefs[Keys.vaultName],
+                lectureUri = prefs[Keys.lectureUri],
+                lectureName = prefs[Keys.lectureName],
                 themeMode = ThemeMode.fromStorage(prefs[Keys.theme]),
                 includeHidden = prefs[Keys.includeHidden] ?: false,
                 caseSensitiveSearch = prefs[Keys.caseSensitive] ?: false,
@@ -64,6 +68,20 @@ class DataStoreSettingsRepository(context: Context) : SettingsRepository {
         dataStore.edit {
             it.remove(Keys.vaultUri)
             it.remove(Keys.vaultName)
+        }
+    }
+
+    override suspend fun setLecture(uri: String, displayName: String) {
+        dataStore.edit {
+            it[Keys.lectureUri] = uri
+            it[Keys.lectureName] = displayName
+        }
+    }
+
+    override suspend fun clearLecture() {
+        dataStore.edit {
+            it.remove(Keys.lectureUri)
+            it.remove(Keys.lectureName)
         }
     }
 

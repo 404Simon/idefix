@@ -283,6 +283,8 @@ private class FakeSettingsRepository : SettingsRepository {
 
     override suspend fun setVault(uri: String, displayName: String) = Unit
     override suspend fun clearVault() = Unit
+    override suspend fun setLecture(uri: String, displayName: String) = Unit
+    override suspend fun clearLecture() = Unit
     override suspend fun setTheme(mode: dev.idefix.app.domain.model.ThemeMode) = Unit
     override suspend fun setIncludeHidden(enabled: Boolean) = Unit
     override suspend fun setCaseSensitive(enabled: Boolean) = Unit

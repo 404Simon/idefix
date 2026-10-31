@@ -20,6 +20,14 @@ class FakeSettingsRepository(initial: AppSettings = AppSettings()) : SettingsRep
         state.update { it.copy(vaultUri = null, vaultName = null) }
     }
 
+    override suspend fun setLecture(uri: String, displayName: String) {
+        state.update { it.copy(lectureUri = uri, lectureName = displayName) }
+    }
+
+    override suspend fun clearLecture() {
+        state.update { it.copy(lectureUri = null, lectureName = null) }
+    }
+
     override suspend fun setTheme(mode: ThemeMode) {
         state.update { it.copy(themeMode = mode) }
     }

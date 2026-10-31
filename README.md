@@ -62,7 +62,7 @@ storage permission is requested.
 ## Features
 
 - The app opens on the Tasks tab, which is the first item in the bottom
-  navigation bar (or navigation rail). Notes, search and settings follow.
+  navigation bar (or navigation rail). Notes, Lectures and Settings follow.
 - Neovim-style first-key search commands when the field is empty: `f` filename,
   `g` full-text grep, `n` new note from a slugified title, `m` files starting
   with `Modul_`. The active command is shown in the leading slot of the field.
@@ -100,10 +100,17 @@ storage permission is requested.
 - Recent notes, cursor positions and scroll positions stored in the local Room
   database, with a configurable history limit. Recent notes appear on the Notes
   page when the search field is empty, and history can be cleared from Settings.
+- A separate Lectures folder with its own persisted SAF permission, selectable
+  from the Lectures tab or Settings. Every top-level subfolder is shown as one
+  lecture. Inside a lecture, folders and files are browsed with breadcrumbs and
+  a name filter; PDFs and other binary files open in the system viewer, while
+  code and text files open in a built-in monospace reader. A folder such as
+  `~/Vorlesungen` can be synced into the device and left untouched by the app.
 - Adaptive Material 3 layout: bottom navigation below 840dp, navigation rail and
   list/detail panes from 840dp; two panes from 600dp. The Tasks tab uses the same
   breakpoint: lists and todos share the inner display, while the cover display
-  navigates from lists to todos with a back action.
+  navigates from lists to todos with a back action. Lectures uses the same
+  list/detail split.
 - Matcha dark sea theme by default (the btop palette), with a true-black canvas
   and near-black sea-glass surfaces for AMOLED displays; system, light and the
   original dark theme, plus dynamic Material You color, are selectable.
@@ -117,6 +124,7 @@ app/src/main/java/dev/idefix/app/
 ├── data/
 │   ├── database/     Room entities, DAOs, manually created FTS5 table
 │   ├── index/        scanning/reconciliation, rename detection
+│   ├── lectures/     separate SAF tree for lecture material
 │   ├── recents/      recent files, positions, searches
 │   ├── search/       filename, FTS5, literal and regex search
 │   ├── settings/     DataStore preferences
