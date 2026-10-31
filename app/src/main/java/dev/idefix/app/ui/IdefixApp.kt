@@ -13,12 +13,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Article
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.DateRange
-import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.outlined.Article
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -75,8 +72,6 @@ import dev.idefix.app.ui.components.EmptyState
 import dev.idefix.app.ui.editor.DocumentScreen
 import dev.idefix.app.ui.editor.DocumentViewModel
 import dev.idefix.app.ui.editor.OpenDocumentRequest
-import dev.idefix.app.ui.recents.RecentScreen
-import dev.idefix.app.ui.recents.RecentViewModel
 import dev.idefix.app.ui.search.SearchScreen
 import dev.idefix.app.ui.search.SearchViewModel
 import dev.idefix.app.ui.settings.SettingsScreen
@@ -121,19 +116,11 @@ fun IdefixApp(
             TasksViewModel(container.todoRepository, container.syncCoordinator)
         },
     )
-    val recentViewModel: RecentViewModel = viewModel(
-        factory = idefixViewModelFactory {
-            RecentViewModel(container.recentFilesRepository)
-        },
-    )
-
     val searchState by searchViewModel.state.collectAsStateWithLifecycle()
     val documentState by documentViewModel.state.collectAsStateWithLifecycle()
     val tasksState by tasksViewModel.state.collectAsStateWithLifecycle()
-    val recentFiles by recentViewModel.recentFiles.collectAsStateWithLifecycle()
-    val recentMessages by recentViewModel.state.collectAsStateWithLifecycle()
 
-    var section by rememberSaveable { mutableStateOf(AppSection.SEARCH) }
+    var section by rememberSaveable { mutableStateOf(AppSection.TASKS) }
     var showFileBrowser by rememberSaveable { mutableStateOf(false) }
     var showCreateNote by rememberSaveable { mutableStateOf(false) }
     var searchFocusToken by rememberSaveable { mutableIntStateOf(0) }
@@ -175,7 +162,7 @@ fun IdefixApp(
     LaunchedEffect(section) {
         when (section) {
             AppSection.TASKS -> tasksViewModel.refresh()
-            AppSection.SEARCH -> searchViewModel.refreshSummary()
+            AppSection.NOTES -> searchViewModel.refreshSummary()
             else -> Unit
         }
     }
@@ -191,12 +178,6 @@ fun IdefixApp(
         appState.message?.let {
             snackbarHostState.showSnackbar(it)
             appViewModel.consumeMessage()
-        }
-    }
-    LaunchedEffect(recentMessages.message) {
-        recentMessages.message?.let {
-            snackbarHostState.showSnackbar(it)
-            recentViewModel.consumeMessage()
         }
     }
     LaunchedEffect(tasksState.message) {
@@ -219,7 +200,7 @@ fun IdefixApp(
     }
 
     fun performOpen(request: OpenDocumentRequest) {
-        if (section == AppSection.SETTINGS) section = AppSection.SEARCH
+        if (section == AppSection.SETTINGS) section = AppSection.NOTES
         documentViewModel.open(request)
         scope.launch {
             navigator.navigateTo(ListDetailPaneScaffoldRole.Detail, request.fileId ?: -1L)
@@ -290,7 +271,7 @@ fun IdefixApp(
 
     fun openSearch() {
         if (!twoPane && documentVisible) requestCloseDocument()
-        section = AppSection.SEARCH
+        section = AppSection.NOTES
         searchFocusToken++
     }
 
@@ -436,7 +417,7 @@ fun IdefixApp(
                                         selected = section == item,
                                         onClick = {
                                             section = item
-                                            if (item == AppSection.SEARCH) searchFocusToken++
+                                            if (item == AppSection.NOTES) searchFocusToken++
                                         },
                                         icon = { Icon(sectionIcon(item), contentDescription = null) },
                                         label = { Text(item.label, style = MaterialTheme.typography.labelSmall) },
@@ -457,6 +438,7 @@ fun IdefixApp(
                                     onCaseSensitive = appViewModel::setCaseSensitive,
                                     onDynamicColor = appViewModel::setDynamicColor,
                                     onRecentLimit = appViewModel::setRecentLimit,
+                                    onClearHistory = appViewModel::clearRecentHistory,
                                     onMessage = appViewModel::showMessage,
                                 )
                             } else if (section == AppSection.TASKS) {
@@ -479,7 +461,7 @@ fun IdefixApp(
                                     listPane = {
                                         AnimatedPane(modifier = Modifier.fillMaxSize()) {
                                             when (section) {
-                                                AppSection.SEARCH -> SearchScreen(
+                                                AppSection.NOTES -> SearchScreen(
                                                     state = searchState,
                                                     indexState = appState.indexState,
                                                     isSyncing = appState.isSyncing,
@@ -495,12 +477,6 @@ fun IdefixApp(
                                                 )
 
                                                 AppSection.TASKS -> Unit
-
-                                                AppSection.RECENT -> RecentScreen(
-                                                    files = recentFiles,
-                                                    onOpen = ::openRecent,
-                                                    onClear = recentViewModel::clearHistory,
-                                                )
 
                                                 AppSection.SETTINGS -> Unit
                                             }
@@ -526,9 +502,9 @@ fun IdefixApp(
                                                 )
                                             } else {
                                                 EmptyState(
-                                                    icon = Icons.Outlined.Article,
+                                                    icon = Icons.AutoMirrored.Outlined.Article,
                                                     title = "No note open",
-                                                    message = if (section == AppSection.SEARCH) {
+                                                    message = if (section == AppSection.NOTES) {
                                                         "Select a search result to read it here. Ctrl+K returns to search."
                                                     } else {
                                                         "Select a note to open it in this pane."
@@ -645,8 +621,7 @@ private fun BottomNavigation(current: AppSection, onSelect: (AppSection) -> Unit
 }
 
 private fun sectionIcon(section: AppSection) = when (section) {
-    AppSection.SEARCH -> Icons.Default.Search
     AppSection.TASKS -> Icons.Default.CheckCircle
-    AppSection.RECENT -> Icons.Default.DateRange
+    AppSection.NOTES -> Icons.AutoMirrored.Outlined.Article
     AppSection.SETTINGS -> Icons.Default.Settings
 }

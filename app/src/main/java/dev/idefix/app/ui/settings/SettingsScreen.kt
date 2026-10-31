@@ -66,6 +66,7 @@ fun SettingsScreen(
     onCaseSensitive: (Boolean) -> Unit,
     onDynamicColor: (Boolean) -> Unit,
     onRecentLimit: (Int) -> Unit,
+    onClearHistory: () -> Unit,
     onMessage: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -135,7 +136,7 @@ fun SettingsScreen(
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
                     SwitchRow(
                         title = "Include hidden folders",
-                        description = "Index folders such as .archive. .obsidian is always skipped. Rebuilds the index when changed.",
+                        description = "Index folders such as .archive. .obsidian is always skipped. Reindexes the vault when changed.",
                         checked = settings.includeHidden,
                         onCheckedChange = onIncludeHidden,
                     )
@@ -187,12 +188,12 @@ fun SettingsScreen(
                 }
             }
 
-            item { SectionLabel("History", Modifier.padding(top = 4.dp)) }
+            item { SectionLabel("Recent notes", Modifier.padding(top = 4.dp)) }
             item {
                 SettingsCard {
-                    Text("Recent history limit", style = MaterialTheme.typography.titleSmall)
+                    Text("Recent notes limit", style = MaterialTheme.typography.titleSmall)
                     Text(
-                        text = "How many notes and searches stay in the Recent screen. History is stored only in app storage.",
+                        text = "How many notes stay in the recent list on the Notes page. History is stored only in app storage.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -209,6 +210,10 @@ fun SettingsScreen(
                                 ),
                             )
                         }
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedButton(onClick = onClearHistory) {
+                        Text("Clear recent history")
                     }
                 }
             }

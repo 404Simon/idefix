@@ -185,6 +185,13 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
         }
     }
 
+    fun clearRecentHistory() {
+        viewModelScope.launch {
+            container.recentFilesRepository.clearHistory()
+            _uiState.update { it.copy(message = "Recent history cleared") }
+        }
+    }
+
     fun switchVault() {
         viewModelScope.launch {
             container.indexRepository.cancel()

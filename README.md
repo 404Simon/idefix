@@ -61,6 +61,8 @@ storage permission is requested.
 
 ## Features
 
+- The app opens on the Tasks tab, which is the first item in the bottom
+  navigation bar (or navigation rail). Notes, search and settings follow.
 - Neovim-style first-key search commands when the field is empty: `f` filename,
   `g` full-text grep, `n` new note from a slugified title, `m` files starting
   with `Modul_`. The active command is shown in the leading slot of the field.
@@ -95,8 +97,9 @@ storage permission is requested.
     Oat milk, not soy.
   ```
 
-- Recent files, cursor positions and scroll positions stored in the local Room
-  database, with a configurable history limit.
+- Recent notes, cursor positions and scroll positions stored in the local Room
+  database, with a configurable history limit. Recent notes appear on the Notes
+  page when the search field is empty, and history can be cleared from Settings.
 - Adaptive Material 3 layout: bottom navigation below 840dp, navigation rail and
   list/detail panes from 840dp; two panes from 600dp. The Tasks tab uses the same
   breakpoint: lists and todos share the inner display, while the cover display

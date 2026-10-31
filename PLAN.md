@@ -185,23 +185,22 @@ Use available window size and adaptive layout APIs rather than hardcoding behavi
 
 Keep navigation deliberately small:
 
-1. Search
-2. Tasks
-3. Recent
-4. Settings
+1. Tasks
+2. Notes
+3. Settings
 
-The file browser should be accessible from search and settings. Do not make folder navigation the primary way to find notes.
+The file browser should be accessible from Notes and Settings. Do not make folder navigation the primary way to find notes.
 
-### 4.4 Search-first landing screen
+### 4.4 Tasks-first landing screen
 
-When a vault has been selected, launch directly into the search screen.
+When a vault has been selected, launch directly into the Tasks tab.
 
-The screen should include:
+The Notes screen should include:
 
 - A prominent, automatically focusable search field.
 - Search mode selection: Filename, Full text, Regex.
 - A scrollable result list.
-- Recent searches or recent files when the search field is empty.
+- Recent notes when the search field is empty.
 - Index status and an action to rebuild the index.
 - A visible action to create a new Markdown file.
 - An accessible action to open or switch vaults.
