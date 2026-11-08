@@ -17,18 +17,27 @@ import dev.idefix.app.domain.repository.IndexRepository
 import dev.idefix.app.domain.repository.RecentFilesRepository
 import dev.idefix.app.domain.repository.SearchRepository
 import dev.idefix.app.domain.repository.VaultRepository
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.withContext
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
@@ -71,9 +80,134 @@ class DocumentViewModelTest {
                 line = 3,
             ),
         )
+        val loaded = viewModel.state.first { !it.isLoading }
+
+        assertEquals(DocumentMode.PREVIEW, loaded.mode)
+        assertNotNull(loaded.preview)
+    }
+
+    @Test
+    fun previewIsParsedOnceAndReusedWhenSwitchingFromSource() = runTest(dispatcher.scheduler) {
+        val viewModel = DocumentViewModel(
+            vaultRepository = FakeVaultRepository(file),
+            indexRepository = FakeIndexRepository(),
+            recentFilesRepository = FakeRecentFilesRepository(),
+            searchRepository = FakeSearchRepository(),
+        )
+
+        viewModel.open(
+            OpenDocumentRequest(
+                fileId = 1,
+                uri = file.uri,
+                relativePath = file.relativePath,
+                filename = file.displayName,
+                mode = DocumentMode.SOURCE,
+            ),
+        )
+        val loaded = viewModel.state.first { !it.isLoading }
+        // A source open does not pay for a preview parse.
+        assertNull(loaded.preview)
+
+        viewModel.setMode(DocumentMode.PREVIEW)
+        val preparedState = viewModel.state.first { !it.isPreviewLoading && it.preview != null }
+        val prepared = preparedState.preview
+        assertNotNull(prepared)
+        assertEquals("line 1\nline 2\nline 3\n", prepared?.content)
+
+        viewModel.setMode(DocumentMode.SOURCE)
+        viewModel.setMode(DocumentMode.PREVIEW)
         advanceUntilIdle()
 
-        assertEquals(DocumentMode.PREVIEW, viewModel.state.value.mode)
+        val previewState = viewModel.state.value
+        assertEquals(DocumentMode.PREVIEW, previewState.mode)
+        assertSame(prepared, previewState.preview)
+        assertFalse(previewState.isPreviewLoading)
+    }
+
+    @Test
+    fun editingSourceThenSwitchingToPreviewReparsesTheEditedContent() = runTest(dispatcher.scheduler) {
+        val viewModel = DocumentViewModel(
+            vaultRepository = FakeVaultRepository(file),
+            indexRepository = FakeIndexRepository(),
+            recentFilesRepository = FakeRecentFilesRepository(),
+            searchRepository = FakeSearchRepository(),
+        )
+
+        viewModel.open(
+            OpenDocumentRequest(
+                fileId = 1,
+                uri = file.uri,
+                relativePath = file.relativePath,
+                filename = file.displayName,
+                mode = DocumentMode.PREVIEW,
+            ),
+        )
+        viewModel.state.first { !it.isLoading }
+
+        viewModel.setMode(DocumentMode.SOURCE)
+        viewModel.onTextChanged("edited\n", "edited\n".length)
+        assertNull(viewModel.state.value.preview)
+
+        viewModel.setMode(DocumentMode.PREVIEW)
+        val previewed = viewModel.state.first { !it.isPreviewLoading && it.preview != null }
+
+        assertEquals("edited\n", previewed.preview?.content)
+        assertFalse(previewed.isPreviewLoading)
+    }
+
+    @Test
+    fun stalePreviewParseCannotLeaveTheLoadingFlagStuck() = runTest(dispatcher.scheduler) {
+        val staleDocument = MarkdownDocument.parse("edited\n")
+        val parseStarted = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        var parses = 0
+        val viewModel = DocumentViewModel(
+            vaultRepository = FakeVaultRepository(file),
+            indexRepository = FakeIndexRepository(),
+            recentFilesRepository = FakeRecentFilesRepository(),
+            searchRepository = FakeSearchRepository(),
+            parseDocument = { content ->
+                if (parses++ == 0) {
+                    parseStarted.complete(Unit)
+                    // Finish the cancelled request anyway, so only the
+                    // generation check can reject its result.
+                    withContext(NonCancellable) { release.await() }
+                    staleDocument
+                } else {
+                    MarkdownDocument.parse(content)
+                }
+            },
+        )
+
+        viewModel.open(
+            OpenDocumentRequest(
+                fileId = 1,
+                uri = file.uri,
+                relativePath = file.relativePath,
+                filename = file.displayName,
+                mode = DocumentMode.SOURCE,
+            ),
+        )
+        viewModel.state.first { !it.isLoading }
+
+        viewModel.onTextChanged("edited\n", "edited\n".length)
+        viewModel.setMode(DocumentMode.PREVIEW)
+        parseStarted.await()
+        assertTrue(viewModel.state.value.isPreviewLoading)
+
+        // The content changes while the first parse is in flight; a fresh parse
+        // for the new text is started.
+        viewModel.onTextChanged("edited again\n", "edited again\n".length)
+        assertNull(viewModel.state.value.preview)
+        assertTrue(viewModel.state.value.isPreviewLoading)
+
+        release.complete(Unit)
+        advanceUntilIdle()
+
+        val settled = viewModel.state.value
+        assertFalse(settled.isPreviewLoading)
+        // The new text won; the stale parse result was discarded.
+        assertEquals("edited again\n", settled.preview?.content)
     }
 }
 

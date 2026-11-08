@@ -83,6 +83,10 @@ class SearchViewModel(
 
     private var searchJob: Job? = null
     private var initialisedFromSettings = false
+    // Scroll position is tied to the query and mode that produced the visible
+    // list, so a later search never inherits the previous search's offset.
+    private var savedScrollQuery: String? = null
+    private var savedScrollMode: SearchMode = SearchMode.FILENAME
     private var savedScrollIndex = 0
     private var savedScrollOffset = 0
 
@@ -271,10 +275,20 @@ class SearchViewModel(
      * Scroll position is kept outside [SearchUiState] on purpose: writing it to
      * the state flow on every scroll frame would recompose the whole screen and
      * make the result list stutter.
+     *
+     * The position only applies to the query and mode it was saved for; any
+     * other search starts at the top.
      */
-    fun scrollPosition(): Pair<Int, Int> = savedScrollIndex to savedScrollOffset
+    fun scrollPosition(query: String, mode: SearchMode): Pair<Int, Int> =
+        if (query == savedScrollQuery && mode == savedScrollMode) {
+            savedScrollIndex to savedScrollOffset
+        } else {
+            0 to 0
+        }
 
-    fun saveScroll(firstVisibleItem: Int, firstVisibleOffset: Int) {
+    fun saveScroll(query: String, mode: SearchMode, firstVisibleItem: Int, firstVisibleOffset: Int) {
+        savedScrollQuery = query
+        savedScrollMode = mode
         savedScrollIndex = firstVisibleItem
         savedScrollOffset = firstVisibleOffset
     }

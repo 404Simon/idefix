@@ -44,11 +44,11 @@ import androidx.compose.material3.adaptive.navigation.rememberListDetailPaneScaf
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -65,7 +65,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import androidx.window.core.layout.WindowSizeClass
 import dev.idefix.app.AppContainer
 import dev.idefix.app.domain.model.DocumentMode
 import dev.idefix.app.domain.model.IndexState
@@ -139,7 +138,8 @@ fun IdefixApp(
     var section by rememberSaveable { mutableStateOf(AppSection.TASKS) }
     var showFileBrowser by rememberSaveable { mutableStateOf(false) }
     var showCreateNote by rememberSaveable { mutableStateOf(false) }
-    var searchFocusToken by rememberSaveable { mutableIntStateOf(0) }
+    var focusRequest by rememberSaveable { mutableStateOf(false) }
+    val saveableStateHolder = rememberSaveableStateHolder()
     var pendingAction by remember { mutableStateOf<(() -> Unit)?>(null) }
     var discardDialogOpen by remember { mutableStateOf(false) }
 
@@ -179,14 +179,6 @@ fun IdefixApp(
         if (appState.indexState is IndexState.Ready) {
             searchViewModel.refreshSummary()
             tasksViewModel.refresh()
-        }
-    }
-    LaunchedEffect(section) {
-        when (section) {
-            AppSection.TASKS -> tasksViewModel.refresh()
-            AppSection.NOTES -> searchViewModel.refreshSummary()
-            AppSection.LECTURES -> lecturesViewModel.refresh()
-            else -> Unit
         }
     }
     LaunchedEffect(documentState.saveMessage) {
@@ -295,7 +287,7 @@ fun IdefixApp(
     fun openSearch() {
         if (!twoPane && documentVisible) requestCloseDocument()
         section = AppSection.NOTES
-        searchFocusToken++
+        focusRequest = true
     }
 
     fun openRecent(file: RecentFile) {
@@ -350,6 +342,7 @@ fun IdefixApp(
                 val fileName = name.substringAfterLast('/')
                 val file = container.vaultRepository.createMarkdownFile(parent, fileName, "")
                 container.indexRepository.reindexFile(file)
+                searchViewModel.refreshSummary()
                 val fileId = container.searchRepository.fileIdForPath(file.relativePath)
                 performOpen(
                     OpenDocumentRequest(
@@ -458,10 +451,7 @@ fun IdefixApp(
                                 AppSection.entries.forEach { item ->
                                     NavigationRailItem(
                                         selected = section == item,
-                                        onClick = {
-                                            section = item
-                                            if (item == AppSection.NOTES) searchFocusToken++
-                                        },
+                                        onClick = { section = item },
                                         icon = { Icon(sectionIcon(item), contentDescription = null) },
                                         label = { Text(item.label, style = MaterialTheme.typography.labelSmall) },
                                     )
@@ -469,58 +459,59 @@ fun IdefixApp(
                             }
                         }
                         Box(Modifier.weight(1f).fillMaxSize()) {
-                            if (section == AppSection.SETTINGS) {
-                                SettingsScreen(
-                                    appState = appState,
-                                    onSwitchVault = { vaultPicker.launch(null) },
-                                    onBrowseFiles = { showFileBrowser = true },
-                                    onChooseLecturesFolder = { lecturePicker.launch(null) },
-                                    onClearLecturesFolder = appViewModel::clearLecture,
-                                    onRebuild = appViewModel::rebuildIndex,
-                                    onCancel = appViewModel::cancelIndexing,
-                                    onTheme = appViewModel::setTheme,
-                                    onIncludeHidden = appViewModel::setIncludeHidden,
-                                    onCaseSensitive = appViewModel::setCaseSensitive,
-                                    onDynamicColor = appViewModel::setDynamicColor,
-                                    onRecentLimit = appViewModel::setRecentLimit,
-                                    onClearHistory = appViewModel::clearRecentHistory,
-                                    onMessage = appViewModel::showMessage,
-                                )
-                            } else if (section == AppSection.TASKS) {
-                                TasksScreen(
-                                    state = tasksState,
-                                    indexState = appState.indexState,
-                                    isSyncing = appState.isSyncing,
-                                    twoPane = twoPane,
-                                    onSync = {
-                                        appViewModel.reconcileIndex()
-                                        tasksViewModel.refresh()
-                                    },
-                                    onCancelSync = appViewModel::cancelIndexing,
-                                    viewModel = tasksViewModel,
-                                )
-                            } else if (section == AppSection.LECTURES) {
-                                LecturesScreen(
-                                    state = lecturesState,
-                                    configured = appState.settings.hasLecture,
-                                    twoPane = twoPane,
-                                    onChooseFolder = { lecturePicker.launch(null) },
-                                    onOpenExternal = ::openLectureExternally,
-                                    viewModel = lecturesViewModel,
-                                )
-                            } else {
-                                ListDetailPaneScaffold(
-                                    directive = navigator.scaffoldDirective,
-                                    value = navigator.scaffoldValue,
-                                    listPane = {
-                                        AnimatedPane(modifier = Modifier.fillMaxSize()) {
-                                            when (section) {
-                                                AppSection.NOTES -> SearchScreen(
+                            saveableStateHolder.SaveableStateProvider(section.name) {
+                                if (section == AppSection.SETTINGS) {
+                                    SettingsScreen(
+                                        appState = appState,
+                                        onSwitchVault = { vaultPicker.launch(null) },
+                                        onBrowseFiles = { showFileBrowser = true },
+                                        onChooseLecturesFolder = { lecturePicker.launch(null) },
+                                        onClearLecturesFolder = appViewModel::clearLecture,
+                                        onRebuild = appViewModel::rebuildIndex,
+                                        onCancel = appViewModel::cancelIndexing,
+                                        onTheme = appViewModel::setTheme,
+                                        onIncludeHidden = appViewModel::setIncludeHidden,
+                                        onCaseSensitive = appViewModel::setCaseSensitive,
+                                        onDynamicColor = appViewModel::setDynamicColor,
+                                        onRecentLimit = appViewModel::setRecentLimit,
+                                        onClearHistory = appViewModel::clearRecentHistory,
+                                        onMessage = appViewModel::showMessage,
+                                    )
+                                } else if (section == AppSection.TASKS) {
+                                    TasksScreen(
+                                        state = tasksState,
+                                        indexState = appState.indexState,
+                                        isSyncing = appState.isSyncing,
+                                        twoPane = twoPane,
+                                        onSync = {
+                                            appViewModel.reconcileIndex()
+                                            tasksViewModel.refresh()
+                                        },
+                                        onCancelSync = appViewModel::cancelIndexing,
+                                        viewModel = tasksViewModel,
+                                    )
+                                } else if (section == AppSection.LECTURES) {
+                                    LecturesScreen(
+                                        state = lecturesState,
+                                        configured = appState.settings.hasLecture,
+                                        twoPane = twoPane,
+                                        onChooseFolder = { lecturePicker.launch(null) },
+                                        onOpenExternal = ::openLectureExternally,
+                                        viewModel = lecturesViewModel,
+                                    )
+                                } else {
+                                    ListDetailPaneScaffold(
+                                        directive = navigator.scaffoldDirective,
+                                        value = navigator.scaffoldValue,
+                                        listPane = {
+                                            AnimatedPane(modifier = Modifier.fillMaxSize()) {
+                                                SearchScreen(
                                                     state = searchState,
                                                     indexState = appState.indexState,
                                                     isSyncing = appState.isSyncing,
                                                     vaultName = appState.vault?.displayName ?: "Vault",
-                                                    focusRequestToken = searchFocusToken,
+                                                    focusRequest = focusRequest,
+                                                    onFocusRequestHandled = { focusRequest = false },
                                                     onCreateNamedNote = ::createNote,
                                                     onSwitchVault = { vaultPicker.launch(null) },
                                                     onOpenResult = ::openSearchResult,
@@ -529,48 +520,38 @@ fun IdefixApp(
                                                     onCancelIndex = appViewModel::cancelIndexing,
                                                     viewModel = searchViewModel,
                                                 )
-
-                                                AppSection.TASKS -> Unit
-
-                                                AppSection.LECTURES -> Unit
-
-                                                AppSection.SETTINGS -> Unit
                                             }
-                                        }
-                                    },
-                                    detailPane = {
-                                        AnimatedPane(modifier = Modifier.fillMaxSize()) {
-                                            if (documentVisible) {
-                                                DocumentScreen(
-                                                    state = documentState,
-                                                    showBack = !twoPane || documentState.error != null,
-                                                    onBack = ::requestCloseDocument,
-                                                    onOpenInternalLink = ::handleInternalLink,
-                                                    onDeleted = {
-                                                        documentViewModel.close()
-                                                        closeDetailPane()
-                                                        searchViewModel.refreshResults()
-                                                        searchViewModel.refreshSummary()
-                                                        tasksViewModel.refresh()
-                                                        appViewModel.showMessage("Note deleted")
-                                                    },
-                                                    viewModel = documentViewModel,
-                                                )
-                                            } else {
-                                                EmptyState(
-                                                    icon = Icons.AutoMirrored.Outlined.Article,
-                                                    title = "No note open",
-                                                    message = if (section == AppSection.NOTES) {
-                                                        "Select a search result to read it here. Ctrl+K returns to search."
-                                                    } else {
-                                                        "Select a note to open it in this pane."
-                                                    },
-                                                    modifier = Modifier.fillMaxSize(),
-                                                )
+                                        },
+                                        detailPane = {
+                                            AnimatedPane(modifier = Modifier.fillMaxSize()) {
+                                                if (documentVisible) {
+                                                    DocumentScreen(
+                                                        state = documentState,
+                                                        showBack = !twoPane || documentState.error != null,
+                                                        onBack = ::requestCloseDocument,
+                                                        onOpenInternalLink = ::handleInternalLink,
+                                                        onDeleted = {
+                                                            documentViewModel.close()
+                                                            closeDetailPane()
+                                                            searchViewModel.refreshResults()
+                                                            searchViewModel.refreshSummary()
+                                                            tasksViewModel.refresh()
+                                                            appViewModel.showMessage("Note deleted")
+                                                        },
+                                                        viewModel = documentViewModel,
+                                                    )
+                                                } else {
+                                                    EmptyState(
+                                                        icon = Icons.AutoMirrored.Outlined.Article,
+                                                        title = "No note open",
+                                                        message = "Select a search result to read it here. Ctrl+K returns to search.",
+                                                        modifier = Modifier.fillMaxSize(),
+                                                    )
+                                                }
                                             }
-                                        }
-                                    },
-                                )
+                                        },
+                                    )
+                                }
                             }
                         }
                     }

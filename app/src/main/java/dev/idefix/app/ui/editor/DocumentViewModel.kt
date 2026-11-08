@@ -12,6 +12,7 @@ import dev.idefix.app.domain.repository.SearchRepository
 import dev.idefix.app.domain.repository.VaultRepository
 import dev.idefix.app.util.Hashing
 import dev.idefix.app.util.MarkdownLines
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -50,7 +51,12 @@ data class DocumentUiState(
     val saveMessage: String? = null,
     val cursorLine: Int = 1,
     val cursorOffset: Int = 0,
-    val scrollOffset: Int = 0,
+    /**
+     * Parsed preview for [editContent]. Null while it is being prepared, when a
+     * note was opened directly in source mode, and when parsing failed.
+     */
+    val preview: MarkdownDocument? = null,
+    val isPreviewLoading: Boolean = false,
     val selectionRequest: SelectionRequest? = null,
     val findVisible: Boolean = false,
     val findQuery: String = "",
@@ -67,6 +73,7 @@ class DocumentViewModel(
     private val indexRepository: IndexRepository,
     private val recentFilesRepository: RecentFilesRepository,
     private val searchRepository: SearchRepository,
+    private val parseDocument: suspend (String) -> MarkdownDocument = { MarkdownDocument.parse(it) },
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(DocumentUiState())
@@ -74,10 +81,38 @@ class DocumentViewModel(
 
     private var openJob: Job? = null
     private var positionJob: Job? = null
+    private var previewJob: Job? = null
+    /** Identifies the newest preview request; older results are discarded. */
+    private var previewGeneration = 0
     private var selectionId = 0L
+    // Lives with the ViewModel, not the composable, so a tab switch cannot
+    // re-consume a selection request (which would steal focus on re-entry).
+    private var lastConsumedSelectionId = -1L
+    // Deliberately plain state: scrolling must not emit a Compose state update.
+    private var scrollOffset = 0
+
+    /**
+     * Current preview scroll. Called on recomposition while the preview is
+     * shown, but intentionally not observable Compose state: the value is only
+     * used as the initial scroll when a preview is created.
+     */
+    fun currentScrollOffset(): Int = scrollOffset
+
+    /**
+     * Returns true exactly once per [id]. Used by the source editor to tell a
+     * fresh caret request (focus and place the cursor) apart from one that was
+     * already handled before the editor left composition.
+     */
+    fun consumeSelectionRequest(id: Long): Boolean {
+        if (id <= lastConsumedSelectionId) return false
+        lastConsumedSelectionId = id
+        return true
+    }
 
     fun open(request: OpenDocumentRequest) {
         openJob?.cancel()
+        previewJob?.cancel()
+        previewGeneration++
         savePositionNow()
         _state.value = DocumentUiState(isLoading = true, fileId = request.fileId)
         openJob = viewModelScope.launch {
@@ -90,6 +125,19 @@ class DocumentViewModel(
                     uri = request.uri,
                 )
                 val content = vaultRepository.readText(file)
+                // A source open defers parsing to setMode(PREVIEW). A failed
+                // parse must not abort the open; the preview UI renders the error.
+                val preview = if (request.mode == DocumentMode.PREVIEW) {
+                    try {
+                        parseDocument(content)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        null
+                    }
+                } else {
+                    null
+                }
                 val fingerprint = Hashing.sha256(content)
                 val fileId = request.fileId ?: searchRepository.fileIdForPath(file.relativePath)
                 val position = fileId?.let { recentFilesRepository.positionFor(it) }
@@ -103,6 +151,7 @@ class DocumentViewModel(
                 } else {
                     position?.cursorLine ?: 1
                 }
+                scrollOffset = position?.scrollOffset ?: 0
                 selectionId++
                 _state.value = DocumentUiState(
                     isLoading = false,
@@ -114,7 +163,7 @@ class DocumentViewModel(
                     mode = request.mode,
                     cursorLine = cursorLine,
                     cursorOffset = cursorOffset,
-                    scrollOffset = position?.scrollOffset ?: 0,
+                    preview = preview,
                     selectionRequest = SelectionRequest(selectionId, cursorOffset),
                 )
                 if (fileId != null) {
@@ -122,6 +171,8 @@ class DocumentViewModel(
                     // Keep an index entry fresh when another app changed the file since indexing.
                     viewModelScope.launch { runCatching { indexRepository.reindexFile(file) } }
                 }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 _state.update {
                     it.copy(isLoading = false, error = e.message ?: "Could not open the note")
@@ -153,10 +204,12 @@ class DocumentViewModel(
                 selectionRequest = SelectionRequest(selectionId, it.cursorOffset),
             )
         }
+        if (mode == DocumentMode.PREVIEW) ensurePreview()
     }
 
     fun onTextChanged(text: String, cursorOffset: Int) {
         val current = _state.value
+        invalidatePreviewIfStale(text)
         val matches = if (current.findQuery.isNotBlank()) findMatches(text, current.findQuery) else current.findMatches
         _state.update {
             it.copy(
@@ -168,6 +221,7 @@ class DocumentViewModel(
                 findIndex = if (matches.isEmpty()) -1 else it.findIndex.coerceIn(0, matches.lastIndex),
             )
         }
+        if (_state.value.mode == DocumentMode.PREVIEW) ensurePreview()
         schedulePositionSave()
     }
 
@@ -183,7 +237,7 @@ class DocumentViewModel(
     }
 
     fun onScrollChanged(offset: Int) {
-        _state.update { it.copy(scrollOffset = offset) }
+        scrollOffset = offset
         schedulePositionSave()
     }
 
@@ -268,6 +322,7 @@ class DocumentViewModel(
                 findMatches = if (it.findQuery.isBlank()) emptyList() else findMatches(conflict.currentContent, it.findQuery),
             )
         }
+        if (_state.value.mode == DocumentMode.PREVIEW) ensurePreview()
     }
 
     fun dismissConflict() {
@@ -283,13 +338,18 @@ class DocumentViewModel(
                 saveMessage = "Edits discarded",
             )
         }
+        if (_state.value.mode == DocumentMode.PREVIEW) ensurePreview()
         savePositionNow()
     }
 
     fun close() {
         savePositionNow()
         openJob?.cancel()
+        previewJob?.cancel()
+        previewGeneration++
+        lastConsumedSelectionId = -1L
         _state.value = DocumentUiState()
+        scrollOffset = 0
     }
 
     fun showFind() {
@@ -407,6 +467,48 @@ class DocumentViewModel(
         }
     }
 
+    /**
+     * Prepares a preview for the current [DocumentUiState.editContent] unless the
+     * cache already matches. Called when preview becomes visible or when the
+     * content changes while it is visible, never on source keystrokes.
+     */
+    private fun ensurePreview() {
+        val current = _state.value
+        if (!current.hasDocument) return
+        val content = current.editContent
+        if (current.preview?.content == content) return
+        val generation = ++previewGeneration
+        previewJob?.cancel()
+        // Never leave an older document on screen while this content is parsed.
+        _state.update { it.copy(preview = null, isPreviewLoading = true) }
+        previewJob = viewModelScope.launch {
+            val parsed = try {
+                parseDocument(content)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                null
+            }
+            // A newer request or an invalidation owns the state now.
+            if (generation != previewGeneration) return@launch
+            _state.update { it.copy(preview = parsed, isPreviewLoading = false) }
+        }
+    }
+
+    /**
+     * Drops the cached preview once [text] diverges from it and stops a parse for
+     * the old content. Cheap while the preview still matches: no state emission.
+     */
+    private fun invalidatePreviewIfStale(text: String) {
+        val cached = _state.value.preview
+        val parsing = previewJob?.isActive == true
+        if (cached == null && !parsing) return
+        if (cached?.content == text) return
+        previewGeneration++
+        previewJob?.cancel()
+        _state.update { it.copy(preview = null, isPreviewLoading = false) }
+    }
+
     private fun schedulePositionSave() {
         positionJob?.cancel()
         positionJob = viewModelScope.launch {
@@ -419,13 +521,14 @@ class DocumentViewModel(
         val current = _state.value
         val fileId = current.fileId ?: return
         if (!current.hasDocument) return
+        val savedScroll = scrollOffset
         viewModelScope.launch {
             runCatching {
                 recentFilesRepository.updatePosition(
                     fileId = fileId,
                     cursorLine = current.cursorLine,
                     cursorOffset = current.cursorOffset,
-                    scrollOffset = current.scrollOffset,
+                    scrollOffset = savedScroll,
                     matchLine = null,
                 )
             }

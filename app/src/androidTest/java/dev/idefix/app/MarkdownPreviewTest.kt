@@ -9,8 +9,10 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import dev.idefix.app.domain.model.ThemeMode
+import dev.idefix.app.ui.editor.MarkdownDocument
 import dev.idefix.app.ui.editor.MarkdownPreview
 import dev.idefix.app.ui.theme.IdefixTheme
+import kotlinx.coroutines.runBlocking
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -35,11 +37,13 @@ class MarkdownPreviewTest {
         ## Secondary heading
     """.trimIndent()
 
+    private val document = runBlocking { MarkdownDocument.parse(sample) }
+
     @Test
     fun frontmatterIsRenderedAsMetadataAndHiddenFromMarkdown() {
         composeRule.setContent {
             IdefixTheme(ThemeMode.DARK, dynamicColor = false) {
-                MarkdownPreview(content = sample, onInternalLink = {})
+                MarkdownPreview(document = document, onInternalLink = {})
             }
         }
         composeRule.onNodeWithText("Frontmatter").assertIsDisplayed()
@@ -56,7 +60,7 @@ class MarkdownPreviewTest {
     fun frontmatterCanBeCollapsed() {
         composeRule.setContent {
             IdefixTheme(ThemeMode.DARK, dynamicColor = false) {
-                MarkdownPreview(content = sample, onInternalLink = {})
+                MarkdownPreview(document = document, onInternalLink = {})
             }
         }
         composeRule.onNodeWithContentDescription("Collapse frontmatter").performClick()

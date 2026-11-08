@@ -39,6 +39,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -78,7 +79,8 @@ fun SearchScreen(
     indexState: IndexState,
     isSyncing: Boolean,
     vaultName: String,
-    focusRequestToken: Int,
+    focusRequest: Boolean,
+    onFocusRequestHandled: () -> Unit,
     onCreateNamedNote: (String) -> Unit,
     onSwitchVault: () -> Unit,
     onOpenResult: (SearchResult) -> Unit,
@@ -94,19 +96,13 @@ fun SearchScreen(
     val focusManager = LocalFocusManager.current
     var fieldFocused by remember { mutableStateOf(false) }
     var menuOpen by remember { mutableStateOf(false) }
-    var autoFocused by remember { mutableStateOf(false) }
 
-    LaunchedEffect(focusRequestToken) {
-        if (focusRequestToken > 0) {
+    LaunchedEffect(focusRequest) {
+        if (focusRequest) {
             viewModel.rearmCommand()
             focusRequester.requestFocus()
             keyboard?.show()
-        }
-    }
-    LaunchedEffect(state.summary.fileCount) {
-        if (!autoFocused && state.summary.fileCount > 0) {
-            autoFocused = true
-            focusRequester.requestFocus()
+            onFocusRequestHandled()
         }
     }
 
@@ -405,27 +401,47 @@ private fun SearchResults(
     viewModel: SearchViewModel,
     modifier: Modifier = Modifier,
 ) {
-    val savedScroll = remember(viewModel) { viewModel.scrollPosition() }
+    val savedScroll = remember(viewModel) { viewModel.scrollPosition(state.query, state.mode) }
     val listState = rememberLazyListState(
         initialFirstVisibleItemIndex = savedScroll.first,
         initialFirstVisibleItemScrollOffset = savedScroll.second,
     )
+    // The query/mode the list was last composed with, so disposing it saves the
+    // offset under the search that actually produced these rows.
+    val currentQuery by rememberUpdatedState(state.query)
+    val currentMode by rememberUpdatedState(state.mode)
     // Save the scroll position when the list leaves composition instead of
     // observing the scroll state on every frame.
     DisposableEffect(listState) {
         onDispose {
             viewModel.saveScroll(
+                currentQuery,
+                currentMode,
                 listState.firstVisibleItemIndex,
                 listState.firstVisibleItemScrollOffset,
             )
         }
     }
+    // Only react to real changes: on re-entry after a tab switch the restored
+    // scroll position must survive, so first composition must not scroll.
+    var lastQuery by remember { mutableStateOf(state.query) }
+    var lastMode by remember { mutableStateOf(state.mode) }
     LaunchedEffect(state.query, state.mode) {
-        if (listState.firstVisibleItemIndex != 0) listState.scrollToItem(0)
+        if (state.query != lastQuery || state.mode != lastMode) {
+            lastQuery = state.query
+            lastMode = state.mode
+            if (listState.firstVisibleItemIndex != 0 || listState.firstVisibleItemScrollOffset != 0) {
+                listState.scrollToItem(0)
+            }
+        }
     }
+    var lastSelectedIndex by remember { mutableStateOf(state.selectedIndex) }
     LaunchedEffect(state.selectedIndex) {
-        if (state.results.isNotEmpty()) {
-            listState.animateScrollToItem(state.selectedIndex.coerceIn(0, state.results.lastIndex))
+        if (state.selectedIndex != lastSelectedIndex) {
+            lastSelectedIndex = state.selectedIndex
+            if (state.results.isNotEmpty()) {
+                listState.animateScrollToItem(state.selectedIndex.coerceIn(0, state.results.lastIndex))
+            }
         }
     }
     val timeLabels = remember(state.results) {

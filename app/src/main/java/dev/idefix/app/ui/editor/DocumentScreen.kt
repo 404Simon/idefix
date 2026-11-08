@@ -9,11 +9,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -32,7 +30,6 @@ import androidx.compose.material.icons.outlined.FindReplace
 import androidx.compose.material.icons.outlined.Save
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -51,6 +48,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -97,11 +95,19 @@ fun DocumentScreen(
     var renameText by remember { mutableStateOf("") }
     val findFocus = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
+    // One-shot per visible find session: saved so returning to this tab while
+    // find stays open does not request focus (and reopen the keyboard) again.
+    var findFocusRequested by rememberSaveable { mutableStateOf(false) }
 
     LaunchedEffect(state.findVisible) {
         if (state.findVisible) {
-            delay(80)
-            findFocus.requestFocus()
+            if (!findFocusRequested) {
+                delay(80)
+                findFocus.requestFocus()
+                findFocusRequested = true
+            }
+        } else {
+            findFocusRequested = false
         }
     }
     LaunchedEffect(state.saveMessage) {
@@ -306,16 +312,33 @@ fun DocumentScreen(
                 )
 
                 state.mode == DocumentMode.PREVIEW -> {
-                    androidx.compose.runtime.key(state.file?.uri) {
-                        MarkdownPreview(
-                            content = state.editContent,
-                            onInternalLink = onOpenInternalLink,
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxWidth(),
-                            initialScroll = state.scrollOffset,
-                            onScrollChanged = viewModel::onScrollChanged,
-                        )
+                    val preview = state.preview
+                    androidx.compose.runtime.key(state.file.uri) {
+                        when {
+                            state.isPreviewLoading -> LoadingState(
+                                "Preparing preview…",
+                                Modifier
+                                    .weight(1f)
+                                    .fillMaxWidth(),
+                            )
+
+                            preview != null -> MarkdownPreview(
+                                document = preview,
+                                onInternalLink = onOpenInternalLink,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxWidth(),
+                                initialScroll = viewModel.currentScrollOffset(),
+                                onScrollChanged = viewModel::onScrollChanged,
+                            )
+
+                            else -> ErrorState(
+                                message = "Could not prepare the preview.",
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxWidth(),
+                            )
+                        }
                     }
                 }
 
@@ -468,8 +491,12 @@ private fun SourceEditor(
     viewModel: DocumentViewModel,
     modifier: Modifier = Modifier,
 ) {
-    var value by remember { mutableStateOf(TextFieldValue(state.editContent)) }
-    var lastSelectionId by remember { mutableStateOf(-1L) }
+    // Seed the caret at the live cursor so re-entering the tab does not jump to
+    // the start of the note.
+    val startOffset = state.cursorOffset.coerceIn(0, state.editContent.length)
+    var value by remember {
+        mutableStateOf(TextFieldValue(state.editContent, TextRange(startOffset)))
+    }
     val editorFocus = remember { FocusRequester() }
 
     LaunchedEffect(state.editContent) {
@@ -479,12 +506,16 @@ private fun SourceEditor(
     }
     LaunchedEffect(state.selectionRequest) {
         val request = state.selectionRequest ?: return@LaunchedEffect
-        if (request.id != lastSelectionId) {
-            lastSelectionId = request.id
-            val offset = request.offset.coerceIn(0, value.text.length)
-            value = value.copy(selection = TextRange(offset))
-            editorFocus.requestFocus()
+        // Consume first: a request that was already handled before the editor
+        // left composition (tab switch) must restore the caret without
+        // requesting focus and reopening the soft keyboard.
+        val fresh = viewModel.consumeSelectionRequest(request.id)
+        val offset = if (fresh) request.offset else state.cursorOffset
+        val target = offset.coerceIn(0, value.text.length)
+        if (value.selection.start != target) {
+            value = value.copy(selection = TextRange(target))
         }
+        if (fresh) editorFocus.requestFocus()
     }
 
     Box(

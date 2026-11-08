@@ -61,17 +61,22 @@ class DefaultIndexRepository(
                 }
                 try {
                     cancelRequested.set(false)
+                    // Shared by the scan callback and the read loop below; phase
+                    // changes and final states are always published unthrottled.
+                    val progressThrottle = ProgressThrottle()
                     _state.value = IndexState.Running(IndexPhase.SCANNING)
                     val scan = vaultRepository.scanMarkdownFiles(includeHidden) { progress: ScanProgress ->
                         if (cancelRequested.get()) throw IndexCancelledException()
-                        val current = _state.value
-                        val processed = if (current is IndexState.Running) current.processed else 0
-                        _state.value = IndexState.Running(
-                            phase = IndexPhase.SCANNING,
-                            discovered = progress.discovered,
-                            processed = processed,
-                            currentPath = progress.currentPath,
-                        )
+                        if (progressThrottle.shouldEmit()) {
+                            val current = _state.value
+                            val processed = if (current is IndexState.Running) current.processed else 0
+                            _state.value = IndexState.Running(
+                                phase = IndexPhase.SCANNING,
+                                discovered = progress.discovered,
+                                processed = processed,
+                                currentPath = progress.currentPath,
+                            )
+                        }
                     }
                     val failures = scan.failures.toMutableList()
                     if (cancelRequested.get()) {
@@ -151,14 +156,23 @@ class DefaultIndexRepository(
                                 processed++
                             }
                         }
-                        _state.value = IndexState.Running(
-                            phase = IndexPhase.READING,
-                            discovered = scan.files.size,
-                            processed = processed,
-                            indexed = indexed,
-                            failures = failures.size,
-                            currentPath = file.relativePath,
-                        )
+                        if (progressThrottle.shouldEmit()) {
+                            _state.value = IndexState.Running(
+                                phase = IndexPhase.READING,
+                                discovered = scan.files.size,
+                                processed = processed,
+                                indexed = indexed,
+                                failures = failures.size,
+                                currentPath = file.relativePath,
+                            )
+                        }
+                    }
+
+                    // A cancel arriving during the last file must win over the
+                    // finalising/Ready states that follow.
+                    if (cancelRequested.get()) {
+                        _state.value = IndexState.Cancelled
+                        return@withContext IndexResult(indexed, 0, failures, cancelled = true)
                     }
 
                     _state.value = IndexState.Running(

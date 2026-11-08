@@ -1,7 +1,6 @@
 package dev.idefix.app.ui.editor
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -53,16 +52,15 @@ import androidx.compose.ui.unit.sp
 import com.mikepenz.markdown.m3.Markdown
 import com.mikepenz.markdown.m3.markdownColor
 import com.mikepenz.markdown.m3.markdownTypography
-import com.mikepenz.markdown.model.rememberMarkdownState
 import dev.idefix.app.ui.theme.MonoStyle
 import dev.idefix.app.util.Frontmatter
 import dev.idefix.app.util.FrontmatterField
-import dev.idefix.app.util.FrontmatterParser
+import kotlinx.coroutines.flow.drop
 import androidx.compose.ui.platform.LocalUriHandler as PlatformLocalUriHandler
 
 @Composable
 fun MarkdownPreview(
-    content: String,
+    document: MarkdownDocument,
     onInternalLink: (String) -> Unit,
     modifier: Modifier = Modifier,
     initialScroll: Int = 0,
@@ -71,7 +69,7 @@ fun MarkdownPreview(
     val platformHandler = LocalUriHandler.current
     val currentOnInternalLink = rememberUpdatedState(onInternalLink)
     val scrollState = rememberScrollState(initial = initialScroll)
-    val frontmatter = remember(content) { FrontmatterParser.parse(content) }
+    val frontmatter = document.frontmatter
     val handler = remember(platformHandler) {
         object : UriHandler {
             override fun openUri(uri: String) {
@@ -86,7 +84,6 @@ fun MarkdownPreview(
             }
         }
     }
-    val markdownState = rememberMarkdownState(frontmatter?.body ?: content)
     val colors = markdownColor(
         codeBackground = MaterialTheme.colorScheme.surfaceContainerHigh,
         inlineCodeBackground = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -170,7 +167,7 @@ fun MarkdownPreview(
             }
             CompositionLocalProvider(PlatformLocalUriHandler provides handler) {
                 Markdown(
-                    markdownState,
+                    document.markdown,
                     colors = colors,
                     typography = typography,
                     modifier = Modifier.fillMaxWidth(),
@@ -179,7 +176,9 @@ fun MarkdownPreview(
         }
     }
     LaunchedEffect(scrollState) {
-        snapshotFlow { scrollState.value }.collect(onScrollChanged)
+        // The first emission is the restored initial value; only real scroll
+        // changes afterwards should be persisted.
+        snapshotFlow { scrollState.value }.drop(1).collect(onScrollChanged)
     }
 }
 
