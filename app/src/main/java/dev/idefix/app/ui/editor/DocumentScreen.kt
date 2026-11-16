@@ -7,14 +7,19 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.exclude
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
@@ -50,6 +55,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -61,12 +67,12 @@ import androidx.compose.ui.input.key.isCtrlPressed
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -77,6 +83,7 @@ import dev.idefix.app.ui.components.LoadingState
 import dev.idefix.app.ui.theme.MonoStyle
 import dev.idefix.app.util.MarkdownLines
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -150,7 +157,14 @@ fun DocumentScreen(
                 }
             },
     ) {
-        Column(modifier = Modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                // Keep the editor above the soft keyboard. The Scaffold above already
+                // reserves the navigation bar, so only the part of the IME inset that
+                // extends beyond it is needed here.
+                .windowInsetsPadding(WindowInsets.ime.exclude(WindowInsets.navigationBars)),
+        ) {
             TopAppBar(
                 navigationIcon = {
                     if (showBack) {
@@ -492,17 +506,30 @@ private fun SourceEditor(
     modifier: Modifier = Modifier,
 ) {
     // Seed the caret at the live cursor so re-entering the tab does not jump to
-    // the start of the note.
+    // the start of the note. The note itself lives in the view model, so the
+    // field state only has to outlive this composition.
     val startOffset = state.cursorOffset.coerceIn(0, state.editContent.length)
-    var value by remember {
-        mutableStateOf(TextFieldValue(state.editContent, TextRange(startOffset)))
-    }
+    val editorState = remember { TextFieldState(state.editContent, TextRange(startOffset)) }
     val editorFocus = remember { FocusRequester() }
+    // Extra space below the last line while typing keeps the active line from
+    // hugging the keyboard edge.
+    val keyboardVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
 
+    // Adopt content changes that did not come from the field itself, for
+    // example a reload after an external edit or discarded changes.
     LaunchedEffect(state.editContent) {
-        if (value.text != state.editContent) {
-            value = value.copy(text = state.editContent, selection = TextRange(state.editContent.length.coerceAtMost(value.selection.start)))
+        if (editorState.text.toString() != state.editContent) {
+            editorState.edit {
+                replace(0, length, state.editContent)
+                placeCursorBeforeCharAt(state.cursorOffset.coerceIn(0, state.editContent.length))
+            }
         }
+    }
+    // Report edits and caret movement back to the view model.
+    LaunchedEffect(editorState) {
+        snapshotFlow { editorState.text.toString() to editorState.selection.start }
+            .distinctUntilChanged()
+            .collect { (text, offset) -> viewModel.onTextChanged(text, offset) }
     }
     LaunchedEffect(state.selectionRequest) {
         val request = state.selectionRequest ?: return@LaunchedEffect
@@ -511,9 +538,9 @@ private fun SourceEditor(
         // requesting focus and reopening the soft keyboard.
         val fresh = viewModel.consumeSelectionRequest(request.id)
         val offset = if (fresh) request.offset else state.cursorOffset
-        val target = offset.coerceIn(0, value.text.length)
-        if (value.selection.start != target) {
-            value = value.copy(selection = TextRange(target))
+        val target = offset.coerceIn(0, editorState.text.length)
+        if (editorState.selection.start != target) {
+            editorState.edit { placeCursorBeforeCharAt(target) }
         }
         if (fresh) editorFocus.requestFocus()
     }
@@ -522,14 +549,15 @@ private fun SourceEditor(
         modifier = modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .padding(
+                start = 12.dp,
+                top = 10.dp,
+                end = 12.dp,
+                bottom = if (keyboardVisible) 16.dp else 10.dp,
+            ),
     ) {
         BasicTextField(
-            value = value,
-            onValueChange = {
-                value = it
-                viewModel.onTextChanged(it.text, it.selection.start)
-            },
+            state = editorState,
             modifier = Modifier
                 .fillMaxSize()
                 .focusRequester(editorFocus),
